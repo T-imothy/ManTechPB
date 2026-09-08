@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.6.17"
+local MTPB_VERSION = "0.6.18"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -62,6 +62,17 @@ local MTPB_HELP_FRAME = nil
 local MTPB_HELP_TITLE = nil
 local MTPB_HELP_BODY = nil
 local MTPB_HELP_TABS = {}
+
+-- Kept global to avoid consuming another top-level local in the Lua 5.0
+-- client, whose chunk-local limit is much lower than later clients.
+ManTechPB_FormationButtons = {}
+ManTechPB_FormationLayouts = {
+    near={{0,4,1},{-7,1,0},{-5,-5,0},{0,-7,0},{5,-5,0},{7,1,0}},
+    melee={{0,0,1},{-4,4,0},{4,4,0},{-4,-4,0},{4,-4,0}},
+    arrow={{0,0,1},{0,7,0},{-4,-4,0},{4,-4,0},{-7,-7,0},{7,-7,0}},
+    far={{0,0,1},{-8,7,0},{8,7,0},{-8,-7,0},{8,-7,0}},
+    chaos={{0,0,1},{-7,5,0},{6,7,0},{-3,-7,0},{8,-3,0},{2,4,0}}
+}
 
 local function MTPB_TableCount(value)
     local count = 0
@@ -348,12 +359,12 @@ end
 local function MTPB_QueryBotParty()
     -- Only query state that the manager actually displays.  In particular,
     -- "ll ?" makes every bot dump four unrelated loot lists into chat.
-    MTPB_SendBotCommand("#a co ?" .. MTPB_COMMAND_SEPARATOR .. "#a nc ?" .. MTPB_COMMAND_SEPARATOR .. "#a react ?", "PARTY")
+    MTPB_SendBotCommand("#a co ?" .. MTPB_COMMAND_SEPARATOR .. "#a nc ?" .. MTPB_COMMAND_SEPARATOR .. "#a react ?" .. MTPB_COMMAND_SEPARATOR .. "formation ?", "PARTY")
 end
 
 local function MTPB_QuerySelectedBot(name)
     if not name then return end
-    MTPB_SendBotCommand("#a co ?" .. MTPB_COMMAND_SEPARATOR .. "#a nc ?" .. MTPB_COMMAND_SEPARATOR .. "#a react ?" .. MTPB_COMMAND_SEPARATOR .. "status role" .. MTPB_COMMAND_SEPARATOR .. "status build" .. MTPB_COMMAND_SEPARATOR .. "status pull", "WHISPER", nil, name)
+    MTPB_SendBotCommand("#a co ?" .. MTPB_COMMAND_SEPARATOR .. "#a nc ?" .. MTPB_COMMAND_SEPARATOR .. "#a react ?" .. MTPB_COMMAND_SEPARATOR .. "formation ?" .. MTPB_COMMAND_SEPARATOR .. "status role" .. MTPB_COMMAND_SEPARATOR .. "status build" .. MTPB_COMMAND_SEPARATOR .. "status pull", "WHISPER", nil, name)
 end
 
 local function MTPB_QueryStrategyConfirmation(name, contexts)
@@ -393,7 +404,12 @@ local function MTPB_ParseStrategies(message, sender)
         return true
     end
     if not MTPB_BOTS[sender] then return false end
-    if string.find(message, "Formation: ", 1, true) == 1 then MTPB_BOTS[sender].formation = string.sub(message, 12); return true end
+    if string.find(message, "Formation: ", 1, true) == 1 then
+        local formation = string.gsub(string.sub(message, 12), "|c%x%x%x%x%x%x%x%x", "")
+        formation = string.gsub(formation, "|r", "")
+        MTPB_BOTS[sender].formation = string.lower(MTPB_Trim(formation))
+        return true
+    end
     if string.find(message, "Stance: ", 1, true) == 1 then MTPB_BOTS[sender].stance = string.sub(message, 9); return true end
     if string.find(message, "Mana save level set: ", 1, true) == 1 then MTPB_BOTS[sender].savemana = string.sub(message, 22); return true end
     if string.find(message, "Mana save level: ", 1, true) == 1 then MTPB_BOTS[sender].savemana = string.sub(message, 18); return true end
@@ -495,6 +511,69 @@ function ManTechPB_StyleButton(button, size)
     return button
 end
 
+-- Draw compact top-down formation previews without bundling external artwork.
+-- Gold is the formation anchor (the player or current target); blue squares are
+-- representative bot slots. The drawings intentionally mirror the five legacy
+-- Mangosbot formation choices while remaining readable on all three clients.
+function ManTechPB_AddFormationPreview(button, formation)
+    local preview = CreateFrame("Frame", nil, button)
+    preview:SetWidth(23)
+    preview:SetHeight(19)
+    preview:SetPoint("LEFT", button, "LEFT", 4, 0)
+    preview:SetBackdrop({
+        bgFile="Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",
+        tile=true, tileSize=8, edgeSize=5,
+        insets={left=1,right=1,top=1,bottom=1}
+    })
+    preview:SetBackdropColor(0.01, 0.025, 0.04, 0.96)
+    preview:SetBackdropBorderColor(0.18, 0.42, 0.58, 0.90)
+
+    local layout = ManTechPB_FormationLayouts[formation] or {}
+    local i, point, marker, size
+    for i = 1, table.getn(layout) do
+        point = layout[i]
+        size = point[3] == 1 and 4 or 3
+        marker = preview:CreateTexture(nil, "ARTWORK")
+        marker:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
+        marker:SetWidth(size)
+        marker:SetHeight(size)
+        marker:SetPoint("CENTER", preview, "CENTER", point[1], point[2])
+        if point[3] == 1 then marker:SetVertexColor(1.00, 0.72, 0.10, 1)
+        else marker:SetVertexColor(0.20, 0.82, 1.00, 1) end
+    end
+    button.mtpbFormationPreview = preview
+end
+
+function ManTechPB_UpdateFormationButtons()
+    if not ManTechPB_FormationButtons then return end
+    local names = {}
+    if MTPB_SELECTED then table.insert(names, MTPB_SELECTED)
+    else
+        local partyName
+        for partyName in pairs(MTPB_BOTS) do
+            if MTPB_IsCurrentPartyMember(partyName) then table.insert(names, partyName) end
+        end
+    end
+    local i, j, button, total, matching, data
+    for i = 1, table.getn(ManTechPB_FormationButtons) do
+        button = ManTechPB_FormationButtons[i]
+        total, matching = 0, 0
+        for j = 1, table.getn(names) do
+            data = MTPB_BOTS[names[j]]
+            total = total + 1
+            if data and data.formation == button.form then matching = matching + 1 end
+        end
+        if total > 0 and matching == total then
+            button:SetBackdropBorderColor(0.20, 0.90, 0.45, 1)
+        elseif matching > 0 then
+            button:SetBackdropBorderColor(1.00, 0.68, 0.16, 1)
+        else
+            button:SetBackdropBorderColor(0.26, 0.62, 0.82, 0.95)
+        end
+    end
+end
+
 local MTPB_HELP_PAGES = {
     OVERVIEW = {
         title="Manager overview",
@@ -510,7 +589,7 @@ local MTPB_HELP_PAGES = {
     },
     BEHAVIOR = {
         title="Combat and world behavior",
-        text="Tank Assist makes a bot lead and hold aggro; Damage Assist makes it follow the tank's target. Close and Ranged control combat distance. Pull authorizes a puller; Pull Back tells it to return after drawing the target. Passive prevents normal engagement, while Aggressive enables nearby grinding.\n\nHealer DPS permits damage while healing; turn it off when healing must be the priority. Off-heal lets damage roles help heal. Low Threat reduces threat-generating choices but does not remove class survival abilities.\n\nFormations are group-level controls in Manager > World. Loot behavior and roll policy are separate: Loot controls corpse interaction; Expert > Loot controls roll preference when supported by the core."
+        text="Tank Assist makes a bot lead and hold aggro; Damage Assist makes it follow the tank's target. Close and Ranged control combat distance. Pull authorizes a puller; Pull Back tells it to return after drawing the target. Passive prevents normal engagement, while Aggressive enables nearby grinding.\n\nHealer DPS permits damage while healing; turn it off when healing must be the priority. Off-heal lets damage roles help heal. Low Threat reduces threat-generating choices but does not remove class survival abilities.\n\nFormations are group-level controls in Manager > World. Each button contains a top-down preview: gold marks the anchor and blue marks representative bot positions. A green border is the confirmed formation; gold means only part of the selected party uses it. Loot behavior and roll policy are separate: Loot controls corpse interaction; Expert > Loot controls roll preference when supported by the core."
     },
     CHAT = {
         title="Bot chat and Bot Bar",
@@ -1723,17 +1802,40 @@ local function MTPB_CreateWorld(panel)
         end)
     end
     MTPB_AddHeading(panel, "FORMATION", -62)
-    local forms = {{"Near","near"},{"Melee","melee"},{"Arrow","arrow"},{"Far","far"},{"Chaos","chaos"}}
+    local forms = {
+        {"Near","near","Half-circle close to you"},
+        {"Melee","melee","Cluster around your target"},
+        {"Arrow","arrow","Tank forward; healers and DPS behind"},
+        {"Far","far","Maintain wider spacing"},
+        {"Chaos","chaos","Scatter and move freely"}
+    }
     for i = 1, table.getn(forms) do
         b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-        b:SetWidth(70); b:SetHeight(24); b:SetText(forms[i][1])
-        ManTechPB_StyleButton(b, 12)
+        b:SetWidth(70); b:SetHeight(30); b:SetText(forms[i][1])
+        ManTechPB_StyleButton(b, 11)
         b:SetPoint("TOPLEFT", panel, "TOPLEFT", 4 + (i-1)*75, -84)
         b.form = forms[i][2]; b.label = forms[i][1]
+        local formationLabel = b:GetFontString()
+        if formationLabel then
+            formationLabel:ClearAllPoints()
+            formationLabel:SetPoint("CENTER", b, "CENTER", 11, 0)
+        end
+        ManTechPB_AddFormationPreview(b, b.form)
+        table.insert(ManTechPB_FormationButtons, b)
         b:SetScript("OnClick", function(self)
             local owner = self or this
             MTPB_SendCommands({"#a formation " .. owner.form}, owner.label .. " formation")
         end)
+        b:SetScript("OnEnter", function(self)
+            local owner = self or this
+            GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+            GameTooltip:SetText(owner.label .. " formation")
+            GameTooltip:AddLine(forms[owner.mtpbFormationIndex][3], 1, 1, 1)
+            GameTooltip:AddLine("Gold = anchor   Blue = bots", 0.35, 0.82, 1)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        b.mtpbFormationIndex = i
     end
     MTPB_AddHeading(panel, "WORLD & LOOT", -122)
     local data = {
@@ -2118,6 +2220,7 @@ local function MTPB_UpdateCards()
         if pending then active, mixed = pending.wanted, false end
         MTPB_SetCardState(card, active, mixed, pending)
     end
+    ManTechPB_UpdateFormationButtons()
     MTPB_UpdateRolePanel()
     if MTPB_EXPERT_PAGE and MTPB_RenderExpert then MTPB_RenderExpert() end
 end

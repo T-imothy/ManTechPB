@@ -1,4 +1,4 @@
-ManTechPB 0.6.17
+ManTechPB 0.6.18
 
 ManTechPB is a standalone CMaNGOS PlayerBots manager. It does not require the
 Mangosbot addon and does not overwrite it.
@@ -20,6 +20,7 @@ Design goals:
 - mana conservation levels 1 through 10
 - larger readable text and blue beveled buttons across all three clients
 - contextual Help buttons on the Manager, Individual, Talents, and Bot Bar windows
+- top-down formation previews with confirmed and mixed-party state highlighting
 - title-bar controls use separate click and drag regions on every supported client
 - Healer DPS reads and changes combat-only offdps strategies without requiring a nonexistent non-combat copy
 
