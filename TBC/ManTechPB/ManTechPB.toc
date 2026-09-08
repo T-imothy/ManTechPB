@@ -1,0 +1,7 @@
+## Interface: 20400
+## Title: ManTechPB - TBC
+## Author: ManTech
+## Notes: Standalone, guided CMaNGOS PlayerBots manager with one tabbed interface
+## SavedVariables: ManTechPBDB
+## Version: 0.6.17-TBC.1
+ManTechPB.lua

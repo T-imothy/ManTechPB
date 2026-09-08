@@ -1,0 +1,7 @@
+## Interface: 30300
+## Title: ManTechPB - WotLK
+## Author: ManTech
+## Notes: Standalone, guided CMaNGOS PlayerBots manager with one tabbed interface
+## SavedVariables: ManTechPBDB
+## Version: 0.6.17-WotLK.1
+ManTechPB.lua
