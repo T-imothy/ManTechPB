@@ -363,6 +363,7 @@ end
 local talentBuildButton
 for _, frame in ipairs(frames) do if frame.text == "Holy PvE" then talentBuildButton = frame end end
 assert(talentBuildButton and talentBuildButton.scripts.OnClick, "server talent build was not rendered")
+tick(0.31, 3) -- Wait for all live-list chunks before issuing a talent mutation.
 talentBuildButton.scripts.OnClick(talentBuildButton)
 assert(ManTechPBTalentNextButton and ManTechPBTalentNextButton.scripts.OnClick, "talent pagination control missing")
 ManTechPBTalentNextButton.scripts.OnClick(ManTechPBTalentNextButton)
@@ -403,6 +404,7 @@ if not protectionBuildButton then
     for _, frame in ipairs(frames) do if frame.kind == "Button" and frame.visible and frame.text then table.insert(visibleButtons, tostring(frame.text)) end end
     error("warrior protection talent choice missing; visible buttons: " .. table.concat(visibleButtons, ", "))
 end
+tick(0.31, 3)
 protectionBuildButton.scripts.OnClick(protectionBuildButton)
 tick(0.31, 6)
 local roleSentBeforeTalentConfirmation = false

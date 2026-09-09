@@ -1,4 +1,13 @@
-ManTechPB 0.10.5
+ManTechPB 0.10.6
+
+0.10.6: Builder role/class/spec choices, size/range and PvP policy survive reloads,
+scoped by character, realm and client. Matching members return to their saved
+slots as Keep, without restoring readiness or permission to prepare them.
+Reselect choices lost by older versions once; Clear search preserves choices.
+Auto skips talent names that also match another live build. Explicit ambiguous
+names stop before mutation, not silently substitute. Individual talent buttons
+also check the complete live list. Requested/observed talent mismatch details
+and server refusals are now reported. No core changes or forced exact lookup.
 
 0.10.5: Keep members no longer block recruitment with REVIEW ROLE warnings.
 With four members already grouped, configure the empty slot and Build / Resume.

@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.10.5 |
-| The Burning Crusade | 20400 | 0.10.5-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.10.5-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.10.6 |
+| The Burning Crusade | 20400 | 0.10.6-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.10.6-WotLK.1 |
 
 ## Installation
 
@@ -21,6 +21,24 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 Open the manager with `/mtp`, `/mantechpb`, or the minimap button. Each version folder also contains a detailed `README.txt`.
 
 ## Group / Raid Builder
+
+### New in 0.10.6: saved choices and safe talent-name selection
+
+Role, class/style, exact build, group size, level range and PvP preference now
+persist per character, realm and client version. Member-to-slot hints preserve
+choices when roster order changes. Restored existing members default to Keep;
+preparation permission, candidates and READY/arrival state are never restored.
+Choose Prepare bot deliberately to change an existing member. Preferences lost
+by an older version must be selected once again. Clear search retains choices.
+
+The current core searches talent names by substring, not exact equality. Auto
+now skips ambiguous names. Explicit choices marked `[ambiguous]` are checked
+against the entire live list and blocked before any talent mutation; they are
+not silently replaced. Individual talent buttons also wait for a complete live
+list and reject collisions. The addon cannot force exact selection of a name
+which is also contained in another name on this core. Talent timeouts report
+the requested and observed build, or a missing response, instead of only a
+generic timeout. Server refusals are shown immediately. No core changes.
 
 ### New in 0.10.5: Keep members no longer block filling vacancies
 

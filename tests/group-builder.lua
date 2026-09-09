@@ -216,10 +216,10 @@ local function command(text,name)
     elseif text=="talents list" then
         if scenario.noBuilds then return end
         local build=chosenBuild(name)
-        later(function() emit("CHAT_MSG_PARTY",build.." (0/0/41).",name) end)
+        later(function() emit("CHAT_MSG_PARTY",scenario.buildList or (build.." (0/0/41)."),name) end)
     elseif string.sub(text,1,8)=="talents " or text=="talents" then
         if scenario.rejectTalents then return end
-        local build=chosenBuild(name)
+        local build=scenario.currentBuild or chosenBuild(name)
         later(function() emit("CHAT_MSG_WHISPER","My current talent spec is: "..build.." (0/0/41) Link: 000",name) end)
     elseif string.sub(text,1,3)=="#a " then
         local _,_,context,ops=string.find(text,"^#a (%a+) (.+)$")
@@ -274,6 +274,7 @@ local function reset(options)
     ManTechPB_LFGReset()
     ManTechPB_LFGReset()
     scenario=options or {}; party={}; pending={}; trace={}; invites={}; behaviors={}; nearby={}; raidActive=false; unresolvedNames={}
+    ManTechPBDB.lfgPlans=nil; ManTechPB_LFG.planRestorePending=nil
     ManTechPB_LFG.rosterAt=nil
     ManTechPB_LFG.slots=nil; ManTechPB_LFG.size=nil; ManTechPB_LFG.page=1
     ManTechPB_LFGInitialize()
@@ -674,6 +675,89 @@ end
 for name,ops in pairs(mutations) do for kind,count in pairs(ops) do assert(count==1,"replacement repeated "..name.." "..kind) end end
 table.remove(candidates.MAGE,table.getn(candidates.MAGE))
 print("Core v1 replacement regression passed: only replacement invited/prepared; existing checkpoints retained.")
+
+-- Save choices, not execution state, across a fresh builder/reordered roster.
+local beforeReload=table.getn(trace)
+for i=1,4 do
+    local slot=ManTechPB_LFG.slots[i]
+    slot.preference=slot.candidate.class; slot.buildChoice=slot.build.name; slot.spec="AUTO"
+end
+ManTechPB_LFG.range=1; ManTechPB_LFG.allowPvp=true
+ManTechPB_LFGSavePlan()
+local savedPlan=ManTechPBDB.lfgPlans[ManTechPB_LFGPlanKey()]
+assert(savedPlan.slots[1].member=="Tankbot" and savedPlan.slots[1].buildChoice=="pve prot")
+assert(not savedPlan.slots[1].readySignature and not savedPlan.slots[1].prepareName and not savedPlan.slots[1].candidate,"execution state persisted")
+party={"Healbot","Replacementbot","Tankbot","Magebot"}
+local reloadState=ManTechPB_LFG
+reloadState.slots=nil; reloadState.size=nil; reloadState.range=nil; reloadState.candidates={}
+ManTechPB_LFGInitialize(); ManTechPB_LFGSyncMembers(); ManTechPB_LFGRefreshRows()
+for i=1,4 do
+    local slot=reloadState.slots[i]
+    assert(slot.keepName==savedPlan.slots[i].member,"roster reorder attached choices to wrong member")
+    assert(slot.preference==savedPlan.slots[i].preference and slot.buildChoice==savedPlan.slots[i].buildChoice and slot.role==savedPlan.slots[i].role,"reload lost class/spec/role")
+    assert(not slot.prepareName and not slot.readySignature and not slot.serverArrived,"reload restored unverified authority/readiness")
+end
+assert(reloadState.range==1 and reloadState.allowPvp,"reload lost range/build policy")
+assert(table.getn(trace)==beforeReload,"reload sent commands")
+local savedKey=ManTechPB_LFGPlanKey()
+local oldRealm=GetRealmName
+GetRealmName=function() return "OtherRealm" end
+reloadState.slots=nil; reloadState.size=nil; reloadState.range=nil
+ManTechPB_LFGInitialize()
+assert(not reloadState.slots[1].buildChoice,"plan leaked between realms")
+GetRealmName=oldRealm
+local oldName=UnitName
+UnitName=function(unit) if unit=="player" then return "OtherCharacter" end; return oldName(unit) end
+reloadState.slots=nil; reloadState.size=nil
+ManTechPB_LFGInitialize()
+assert(not reloadState.slots[1].buildChoice,"plan leaked between characters")
+UnitName=oldName
+reloadState.slots=nil; reloadState.size=nil
+ManTechPB_LFGInitialize(); ManTechPB_LFGSyncMembers(); ManTechPB_LFGRefreshRows()
+ManTechPB_LFGReset()
+assert(reloadState.slots[1].buildChoice==savedPlan.slots[1].buildChoice,"Clear search erased saved choice")
+print("Persistence regression passed: reload/reorder, exact choices, Keep-only restoration, character/realm isolation, no commands and Clear search.")
+
+v1reset()
+ManTechPB_LFGSetSize(40)
+ManTechPB_LFG.slots[40].preference="MAGE"
+ManTechPB_LFG.slots[40].buildChoice="pve frost"
+ManTechPB_LFGSavePlan()
+local raidPlanKey=ManTechPB_LFGPlanKey()
+local restoreTraffic=table.getn(trace)
+ManTechPB_LFG.slots=nil; ManTechPB_LFG.size=nil
+ManTechPB_LFGInitialize(); ManTechPB_LFGSyncMembers(); ManTechPB_LFGRefreshRows()
+assert(ManTechPB_LFG.size==40 and ManTechPB_LFG.slots[40].buildChoice=="pve frost","raid plan did not restore")
+assert(not raidActive and table.getn(trace)==restoreTraffic,"restoring raid plan converted/invited without Build")
+local savedBuildInfo=GetBuildInfo
+GetBuildInfo=function() return "other","","",99999 end
+ManTechPB_LFG.slots=nil; ManTechPB_LFG.size=nil
+ManTechPB_LFGInitialize()
+assert(ManTechPB_LFG.size==5,"plan leaked between client versions")
+GetBuildInfo=savedBuildInfo
+ManTechPBDB.lfgPlans[raidPlanKey]={version=1,size=40,slots={{role="broken",preference="broken",buildChoice={}}}}
+ManTechPB_LFG.slots=nil; ManTechPB_LFG.size=nil
+ManTechPB_LFGInitialize()
+assert(ManTechPB_LFG.slots[1].role=="tank" and ManTechPB_LFG.slots[1].preference=="ANY" and not ManTechPB_LFG.slots[1].buildChoice,"invalid plan fields accepted")
+
+-- Model the actual substring lookup: a full requested name can match another
+-- role's build. Explicit ambiguity must stop BEFORE any talent mutation.
+candidates.DRUID={{name="Druidbot",class="DRUID",level=43}}; builds.DRUID="pve dps feral"
+v1reset({buildList="pve dps feral (14/32/5), pve dps feral (dps/tank hybrid) (11/35/5), pve dps balance (boomkin) (38/0/13)."})
+party={"Tankbot","Healbot","Magebot"}; ManTechPB_LFGSyncMembers()
+ManTechPB_LFG.slots[4].preference="DRUID"; ManTechPB_LFG.slots[4].buildChoice="pve dps feral"
+ManTechPB_LFGBuildGroup(); run()
+assert(string.find(ManTechPB_LFG.status.text,"Ambiguous build",1,true),"ambiguity not explained")
+assert(not contains("talents pve dps feral") and not next(mutations),"ambiguous explicit request mutated talents/gear")
+-- A changed current-spec reply is reported verbatim rather than a generic timeout.
+v1reset({currentBuild="pve dps feral (dps/tank hybrid)"})
+party={"Tankbot","Healbot","Magebot"}; ManTechPB_LFGSyncMembers()
+ManTechPB_LFG.slots[4].preference="DRUID"; ManTechPB_LFG.slots[4].buildChoice="pve dps feral"
+ManTechPB_LFGBuildGroup(); run()
+assert(string.find(ManTechPB_LFG.status.text,"requested 'pve dps feral'",1,true) and string.find(ManTechPB_LFG.status.text,"bot reports 'pve dps feral (dps/tank hybrid)'",1,true),"talent mismatch details missing")
+assert(not next(mutations),"mismatched talents allowed prep")
+candidates.DRUID=nil; builds.DRUID=nil
+print("Talent wire regression passed: ambiguity blocked before sending; mismatches explain requested/observed names; no later prep.")
 
 v1reset({clientOnlyArrival=true})
 ManTechPB_LFGBuildGroup(); run()

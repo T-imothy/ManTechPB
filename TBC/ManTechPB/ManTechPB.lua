@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.10.5"
+local MTPB_VERSION = "0.10.6"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -1487,6 +1487,12 @@ local function MTPB_ApplyTalentBuild(build)
     local botName = MTPB_SELECTED
     local buildName = build.name
     local botData = MTPB_BOTS[botName]
+    if not botData or not botData.talentBuildsServer or botData.talentBuildsQueryPending or
+        (botData.talentBuildsCollectUntil and GetTime()<=botData.talentBuildsCollectUntil) then
+        MTPB_TalentStatus("Use Find Builds and wait for the complete live list before applying.",MTPB_COLORS.yellow); return
+    end
+    local problem=ManTechPB_TalentSelectionProblem(buildName,botData.talentBuilds)
+    if problem then MTPB_TalentStatus(problem,MTPB_COLORS.red); return end
     -- Applying a build ends any prior list collection immediately. Otherwise
     -- follow-up notices such as "New spells learned" can arrive while the old
     -- query bot is still remembered and be mistaken for another build row.
@@ -1975,6 +1981,53 @@ local MTPB_LFG_BUILD_CATALOG = {
     },
 }
 
+function ManTechPB_LFGPlanKey()
+    local name=UnitName("player")
+    if not name or name=="" or name=="Unknown" then return nil end
+    return (GetRealmName and GetRealmName() or "")..":"..name..":"..ManTechPB_LFGInterface()
+end
+
+function ManTechPB_LFGSavePlan()
+    local s=ManTechPB_LFG
+    local key=ManTechPB_LFGPlanKey()
+    if not key or not ManTechPBDB or not s.slots or s.planRestorePending or s.rosterPending then return end
+    local plan={version=1,size=s.size,playerSlot=s.playerSlot,range=s.range,allowPvp=s.allowPvp==true,slots={}}
+    for i,slot in ipairs(s.slots) do
+        -- Preferences and member-to-slot hints only. Never persist authority,
+        -- candidates, READY/arrival claims, or permission to prepare a member.
+        plan.slots[i]={role=slot.role,preference=slot.preference,spec=slot.spec,buildChoice=slot.buildChoice,
+            member=slot.keepName or slot.prepareName or (slot.recruited and slot.candidate and slot.candidate.name)}
+    end
+    ManTechPBDB.lfgPlans=ManTechPBDB.lfgPlans or {}
+    ManTechPBDB.lfgPlans[key]=plan
+end
+
+function ManTechPB_LFGRestorePlan()
+    local s=ManTechPB_LFG
+    local key=ManTechPB_LFGPlanKey()
+    local plan=key and ManTechPBDB and ManTechPBDB.lfgPlans and ManTechPBDB.lfgPlans[key]
+    if type(plan)~="table" or plan.version~=1 or type(plan.slots)~="table" then return end
+    local size=plan.size
+    if size~=5 and size~=10 and size~=20 and size~=25 and size~=40 then return end
+    for i=6,size do s.slots[i]={key="SLOT"..i,label="Slot "..i,role="dps",preference="ANY"} end
+    s.size=size; s.playerSlot="DPS3"; s.allowPvp=plan.allowPvp==true
+    if type(plan.range)=="number" and plan.range>=0 and plan.range<=10 then s.range=plan.range end
+    for i=1,size do
+        local slot,choice=s.slots[i],plan.slots[i]
+        if slot.key==plan.playerSlot then s.playerSlot=plan.playerSlot end
+        if type(choice)=="table" then
+            if choice.role=="tank" or choice.role=="heal" or choice.role=="dps" then slot.role=choice.role end
+            if choice.preference=="ANY" or choice.preference=="MELEE" or choice.preference=="RANGED" or MTPB_SPECS[choice.preference] then slot.preference=choice.preference end
+            slot.spec="AUTO"
+            for _,spec in ipairs(MTPB_SPECS[slot.preference] or {}) do if spec.strategy==choice.spec then slot.spec=choice.spec end end
+            if choice.spec=="furyprot" and slot.preference=="WARRIOR" and ManTechPB_LFGInterface()<20000 then slot.spec=choice.spec end
+            if type(choice.buildChoice)=="string" and string.len(choice.buildChoice)<=200 and not string.find(choice.buildChoice,"%c") then slot.buildChoice=choice.buildChoice end
+            if type(choice.member)=="string" and string.len(choice.member)<=64 and not string.find(choice.member,"%c") then slot.restoreMember=choice.member end
+        end
+    end
+    s.planRestorePending=true
+end
+
 function ManTechPB_LFGInitialize()
     local s=ManTechPB_LFG
     if not s.slots then
@@ -1983,6 +2036,7 @@ function ManTechPB_LFGInitialize()
             {key="DPS1",label="DPS 1",role="dps",preference="ANY"},
             {key="DPS2",label="DPS 2",role="dps",preference="ANY"},
             {key="DPS3",label="DPS 3",role="dps",preference="ANY"}}
+        ManTechPB_LFGRestorePlan()
     end
     s.playerSlot=s.playerSlot or (ManTechPBDB and ManTechPBDB.lfgPlayerSlot) or "DPS3"
     s.range=s.range or (ManTechPBDB and ManTechPBDB.lfgLevelRange) or 2
@@ -2100,6 +2154,19 @@ function ManTechPB_LFGSyncMembers()
     if not ManTechPB_LFGRosterReady() then return end
     local used={}
     local i,slot,member
+    -- Rebind saved choices by member identity, not the potentially reordered
+    -- party index. Everyone restored is KEEP until the user opts into PREP.
+    if s.planRestorePending then
+        local restored={}
+        for _,savedSlot in ipairs(s.slots) do
+            local name=savedSlot.restoreMember
+            if name and name~=UnitName("player") and savedSlot.key~=s.playerSlot and not restored[name] and ManTechPB_LFGMember(name) then
+                savedSlot.keepName=name; savedSlot.state="KEEP"; restored[name]=true
+            end
+            savedSlot.restoreMember=nil
+        end
+        s.planRestorePending=nil
+    end
     for i=1,table.getn(s.slots) do
         slot=s.slots[i]
         if slot.key==s.playerSlot then used[UnitName("player")]=true end
@@ -2345,7 +2412,8 @@ function ManTechPB_LFGSpecOptions(slot)
         -- Auto excludes. Still require a matching class/job and the PvP policy.
         local probe={role=slot.role,preference=class,spec="AUTO",buildChoice=build.name}
         if not seen[key] and ManTechPB_LFGFindBuild(probe,{class=class,talentBuilds={build}}) then
-            table.insert(values,{value="BUILD:"..build.name,label=build.name})
+            local problem=ManTechPB_TalentSelectionProblem(build.name,builds)
+            table.insert(values,{value="BUILD:"..build.name,label=build.name..(problem and " [ambiguous]" or "")})
             seen[key]=true
         end
     end
@@ -2369,6 +2437,7 @@ end
 
 function ManTechPB_LFGBuildPolicyChanged(value)
     ManTechPB_LFG.allowPvp=value=="ANY"
+    ManTechPB_LFGSavePlan()
     ManTechPB_LFGSetStatus(value=="ANY" and "PvP fallback allowed when this spec has no PvE build. Exact chosen build is shown during preparation." or "PvE only: unavailable specs stop before talents or gear are changed.")
 end
 
@@ -2444,11 +2513,13 @@ end
 function ManTechPB_LFGRangeChanged(value)
     ManTechPB_LFG.range = tonumber(value) or 2
     if ManTechPBDB then ManTechPBDB.lfgLevelRange = ManTechPB_LFG.range end
+    ManTechPB_LFGSavePlan()
 end
 
 function ManTechPB_LFGPreferenceChanged(index, value)
     local slot = ManTechPB_LFG.slots[index]
     if not slot then return end
+    if slot.preference==value then ManTechPB_LFGRefreshRows(); return end
     slot.preference = value
     slot.spec = "AUTO"
     slot.buildChoice = nil
@@ -2582,6 +2653,7 @@ end
 
 function ManTechPB_LFGRefreshRows()
     local s=ManTechPB_LFG
+    ManTechPB_LFGSavePlan()
     if not s.rows then return end
     local busy=s.building or s.searching
     s.resetButton:SetText(busy and "Cancel" or "Clear search")
@@ -2753,10 +2825,21 @@ function ManTechPB_LFGHandleWhoResults()
     return true
 end
 
+-- The current core uses case-sensitive substring matching, not exact lookup.
+-- Check ALL returned builds, including other roles and PvP paths.
+function ManTechPB_TalentSelectionProblem(name,builds)
+    if type(name)~="string" or name=="" then return "No talent build selected." end
+    for _,other in ipairs(builds or {}) do
+        if type(other.name)=="string" and other.name~=name and string.find(other.name,name,1,true) then
+            return "Ambiguous build '"..name.."': also matches '"..other.name.."'. Choose a uniquely named build. No talent changes sent."
+        end
+    end
+end
+
 function ManTechPB_LFGFindBuild(slot,data)
     if not data or not ManTechPB_LFGClassCanFill(data.class,slot) then return nil end
     if MTPB_SPECS[slot.preference] and slot.preference~=data.class then return nil end
-    local best,bestScore,i,build,spec,lower,score
+    local best,bestScore,i,build,spec,lower,score,blocked
     for i=1,table.getn(data and data.talentBuilds or {}) do
         build=data.talentBuilds[i]; spec=MTPB_FindAIForTalentBuild(build.name,data.class)
         if spec and ((slot.role=="tank" and spec.role=="tank") or (slot.role=="heal" and spec.role=="heal") or
@@ -2767,10 +2850,12 @@ function ManTechPB_LFGFindBuild(slot,data)
             lower,score=string.lower(build.name or ""),0
             if string.find(lower,"pve",1,true) then score=score+20 end
             if string.find(lower,"pvp",1,true) then score=score-20 end
-            if not best or score>bestScore then best,bestScore=build,score end
+            local problem=ManTechPB_TalentSelectionProblem(build.name,data.talentBuilds)
+            if problem and not slot.buildChoice then blocked=blocked or problem
+            elseif not best or score>bestScore then best,bestScore=build,score end
         end
     end
-    return best
+    return best,blocked
 end
 
 function ManTechPB_LFGSpecMatches(slot,build,spec)
@@ -2947,6 +3032,10 @@ function ManTechPB_LFGChatReply(message,sender)
     elseif s.stage=="talents" and s.armed.talents then
         local current=MTPB_CurrentTalentBuild(clean)
         if current and MTPB_NormalizeTalentBuildName(current)==MTPB_NormalizeTalentBuildName(slot.build.name) then s.talentsConfirmed=true end
+        if current then s.talentObserved=current end
+        if string.find(clean,"Talents refused:",1,true) or string.find(clean,"Found multiple specs:",1,true) then
+            ManTechPB_LFGStop(slot.candidate.name..": "..clean..". Settings, gear and supplies were not sent.")
+        end
     end
 end
 
@@ -3217,11 +3306,14 @@ function ManTechPB_LFGTick(token)
     elseif s.stage=="builds" then
         local data=MTPB_BOTS[name]
         if data and data.talentBuildsServer and data.talentBuildsCollectUntil and GetTime()>data.talentBuildsCollectUntil then
-            slot.build=ManTechPB_LFGFindBuild(slot,data)
-            if not slot.build then ManTechPB_LFGStop(name..": no eligible "..(slot.buildChoice or slot.spec or "AUTO").." server build. Check Spec / PvE-only filter. Talents and gear unchanged."); return end
+            local problem
+            slot.build,problem=ManTechPB_LFGFindBuild(slot,data)
+            if not slot.build then ManTechPB_LFGStop(name..": "..(problem or "No eligible "..(slot.buildChoice or slot.spec or "AUTO").." server build. Check Spec / PvE-only filter. Talents and gear unchanged.")); return end
+            problem=ManTechPB_TalentSelectionProblem(slot.build.name,data.talentBuilds)
+            if problem then ManTechPB_LFGStop(name..": "..problem); return end
             ManTechPB_LFGSetStage("talents","SPEC",18)
             ManTechPB_LFGSetStatus(name..": applying "..slot.build.name.." ("..slot.role..").",MTPB_COLORS.yellow)
-            s.talentsConfirmed=nil; data.currentTalentBuild=nil
+            s.talentsConfirmed=nil; s.talentObserved=nil; data.currentTalentBuild=nil
             ManTechPB_LFGSend("talents "..slot.build.name,name,true,"talents")
             s.nextTalentQuery=GetTime()+3+table.getn(MTPB_SEND_QUEUE)*0.35
         end
@@ -3244,7 +3336,9 @@ function ManTechPB_LFGTick(token)
     elseif s.stage=="supply" and s.supplyConfirmed then ManTechPB_LFGSupply() end
     if s.searching then return end
     if s.building and GetTime()>=s.deadline then
-        ManTechPB_LFGStop(name..": "..s.stage.." not confirmed. Server policy or a transient state blocked progress; no later steps sent.")
+        if s.stage=="talents" then
+            ManTechPB_LFGStop(name..": requested '"..slot.build.name.."'; "..(s.talentObserved and "bot reports '"..s.talentObserved.."'" or "no current-spec reply received")..". Settings, gear and supplies were not sent.")
+        else ManTechPB_LFGStop(name..": "..s.stage.." not confirmed. Server policy or a transient state blocked progress; no later steps sent.") end
     end
     if s.building then MTPB_Wait(0.25,ManTechPB_LFGTick,token) end
 end
@@ -3316,7 +3410,7 @@ function ManTechPB_ShowLFGInstructions(page)
     local s=ManTechPB_LFG
     local pages={
         {title="Play & go",text="1. Choose your bots' classes under Class / Style.\n   Pick an exact build under Spec, or leave an Auto choice.\n\n2. Click Build / Resume at the bottom.\n\n3. Wait until every included bot says READY and the\n   bottom message confirms preparation is complete.\n\n4. Go play!\n\nThe addon finds bots, invites them one at a time, summons them, then sets their talents, behavior, gear and supplies. You do not need to invite or prepare each bot yourself.\n\nPrepare bot is an inclusion setting, not another step to click after READY. Keep members are left unchanged."},
-        {title="Your slots",text="ROLE\nChoose Tank, Healer or DPS. Make sure your own slot has the role you will play.\n\nCLASS / STYLE AND SPEC\nChoose a class, then an exact build under Spec (for example furyprot (slam)). Auto by role chooses a suitable build instead. Use Next / Previous for more builds; hover a selected build to read its full name. The bot must offer the exact choice on its live list.\n\nKEEP MEMBER\nLeave this character untouched. This is always used for you and is the default for existing group members. No role-confirmation click is needed to fill empty slots. Kept roles are planning labels, not detected talent roles.\n\nPREPARE BOT\nInclude an existing bot in summoning, respec, gear and supplies. Select this only for bots you want changed. Empty slots recruit new bots automatically."},
+        {title="Your slots",text="ROLE\nChoose Tank, Healer or DPS. Make sure your own slot has the role you will play.\n\nCLASS / STYLE AND SPEC\nChoose a class, then an exact build under Spec (for example furyprot (slam)). Auto by role chooses a suitable unambiguous build instead. Choices persist across reloads; existing members return as Keep. Names marked ambiguous cannot be selected exactly by this core. Use Next / Previous for more builds; hover a selected build to read its full name. The bot must offer the exact choice on its live list.\n\nKEEP MEMBER\nLeave this character untouched. This is always used for you and is the default for existing group members. No role-confirmation click is needed to fill empty slots. Kept roles are planning labels, not detected talent roles.\n\nPREPARE BOT\nInclude an existing bot in summoning, respec, gear and supplies. Select this only for bots you want changed. Empty slots recruit new bots automatically."},
         {title="Other options",text="PARTY / RAID\nChoose the desired group size. Raid selection permits party-to-raid conversion. Use Prev / Next to edit more slots. Kept humans count toward the group size.\n\nLEVEL RANGE\n+/- 2 means bots can be two levels below or above you.\n\nBUILDS: PVE ONLY\nThe default blocks PvP-labelled builds. Allow PvP fallback is optional when your server lacks a PvE preset for the chosen spec. No available matching build means preparation stops; it will not silently pick another spec.\n\nPREVIEW SEARCH / PROTOCOL\nPreview is optional; Build / Resume already searches. Leave Protocol on Core v1 for the updated server. Legacy is for older cores."},
         {title="If it stops",text="READ THE BOTTOM STATUS MESSAGE\nFOUND or CANDIDATE is not READY. The bot still needs to join, arrive and finish preparation. A refusal, missing build or failed check is explained below the rows.\n\nBUILD / RESUME\nAfter resolving the problem, use this to continue. Confirmed work is retained when the plan is unchanged.\n\nCANCEL / CLEAR SEARCH\nCancel stops unsent work; it does not kick bots or undo completed changes. An action already sent can still finish. Closing the window does not cancel. Clear search clears candidates, not your party.\n\nUNCERTAIN GEAR RESULT\nDo not repeatedly restart. Inspect the bot and see Help before clearing a saved preparation checkpoint."}
     }
@@ -4768,6 +4862,7 @@ end
 
 local MTPB_EVENTS = CreateFrame("Frame")
 MTPB_EVENTS:RegisterEvent("VARIABLES_LOADED")
+MTPB_EVENTS:RegisterEvent("PLAYER_LOGOUT")
 MTPB_EVENTS:RegisterEvent("PARTY_MEMBERS_CHANGED")
 pcall(MTPB_EVENTS.RegisterEvent, MTPB_EVENTS, "RAID_ROSTER_UPDATE")
 MTPB_EVENTS:RegisterEvent("PLAYER_TARGET_CHANGED")
@@ -4782,7 +4877,9 @@ MTPB_EVENTS:RegisterEvent("CHAT_MSG_SYSTEM")
 MTPB_EVENTS:SetScript("OnEvent", function(self, eventName, a1, a2, a3, a4)
     local currentEvent = eventName or event
     local p1, p2, p3, p4 = a1 or arg1, a2 or arg2, a3 or arg3, a4 or arg4
-    if currentEvent == "VARIABLES_LOADED" then
+    if currentEvent == "PLAYER_LOGOUT" then
+        ManTechPB_LFGSavePlan()
+    elseif currentEvent == "VARIABLES_LOADED" then
         if not ManTechPBDB then ManTechPBDB = {} end
         if ManTechPBDB.hideBotReplies == nil then ManTechPBDB.hideBotReplies = true end
         MTPB_InstallChatFilter()

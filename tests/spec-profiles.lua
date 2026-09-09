@@ -238,5 +238,12 @@ end
 UnitFactionGroup=savedFaction
 ManTechPB_LFG.slots=savedSlots
 print("Faction class regression passed: Alliance/Horde menus, search, stale candidates, expansion gates and existing members.")
+local collision={{name="pve dps feral"},{name="pve dps feral (dps/tank hybrid)"},{name="pve dps balance (boomkin)"}}
+assert(ManTechPB_TalentSelectionProblem("pve dps feral",collision),"partial-name collision missed")
+assert(not ManTechPB_TalentSelectionProblem("pve dps feral (dps/tank hybrid)",collision),"unique hybrid incorrectly blocked")
+local safeAuto=ManTechPB_LFGFindBuild({role="dps",preference="DRUID",spec="AUTO"},{class="DRUID",talentBuilds=collision})
+assert(safeAuto and not ManTechPB_TalentSelectionProblem(safeAuto.name,collision),"Auto chose ambiguous name")
+assert(ManTechPB_TalentSelectionProblem("pve prot",{{name="pve prot"},{name="pve prot pvp hybrid"}}),"other-policy collision ignored")
+assert(not ManTechPB_TalentSelectionProblem("pve prot",{{name="pve prot"},{name="PVE PROT hybrid"}}),"core case-sensitive matching changed")
 print("Exact-build regression passed: all classes/catalogues, four Classic Warrior tank builds, live override, no substitution, paging and checkpoint invalidation.")
 print("Spec/profile regression passed: "..track..", "..count.." real presets; exact spec/PvP filtering, version gates, "..table.getn(profiles).." role profiles, four-context checks, packet limits, raid puller and UI layout.")
