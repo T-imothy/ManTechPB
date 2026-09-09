@@ -464,9 +464,13 @@ assert(lfgTankBuild and lfgTankBuild.name == "pve prot", "Group Builder did not 
 local lfgHealBuild = ManTechPB_LFGFindBuild(ManTechPB_LFG.slots[2], {class="PRIEST", talentBuilds={{name="pvp shadow",layout="0/0/41"},{name="pve holy",layout="14/47/0"}}})
 assert(lfgHealBuild and lfgHealBuild.name == "pve holy", "Group Builder did not choose the matching PvE healer build")
 sentAddonMessages = {}; sentMessages = {}
+ManTechPB_LFG.slots[1].candidate={class="WARRIOR",name="Tankbot",level=42}
+ManTechPB_LFG.slots[1].build=lfgTankBuild
+ManTechPB_LFG.slots[2].candidate={class="PRIEST",name="Healbot",level=42}
+ManTechPB_LFG.slots[2].build=lfgHealBuild
 ManTechPB_LFGApplyDefaults(ManTechPB_LFG.slots[1], "Tankbot")
 ManTechPB_LFGApplyDefaults(ManTechPB_LFG.slots[2], "Healbot")
-tick(0.31, 20)
+tick(0.31, 100)
 local sawLfgTankDefaults, sawLfgHealerDefaults = false, false
 for _, message in ipairs(sentAddonMessages) do
     local text = message.text or ""

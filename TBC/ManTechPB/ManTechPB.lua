@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.9.2"
+local MTPB_VERSION = "0.10.0"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -418,7 +418,8 @@ local function MTPB_ParseStrategies(message, sender)
     local context, trimAt
     if string.find(message, "Combat Strategies: ", 1, true) == 1 then context, trimAt = "co", 20
     elseif string.find(message, "Non Combat Strategies: ", 1, true) == 1 then context, trimAt = "nc", 24
-    elseif string.find(message, "Reaction Strategies: ", 1, true) == 1 then context, trimAt = "react", 22 end
+    elseif string.find(message, "Reaction Strategies: ", 1, true) == 1 then context, trimAt = "react", 22
+    elseif string.find(message, "Dead Strategies: ", 1, true) == 1 then context, trimAt = "de", 18 end
     if context then
         if not MTPB_BOTS[sender] then MTPB_BOTS[sender] = {} end
         if not MTPB_BOTS[sender].strategy then MTPB_BOTS[sender].strategy = {co={},nc={},react={}} end
@@ -626,7 +627,7 @@ local MTPB_HELP_PAGES = {
     },
     GROUP = {
         title="Group Builder",
-        text="Choose Party or a paged raid plan. Set roles/classes. Existing members default to Keep member; confirm their role. Prepare bot explicitly includes an existing bot. Humans are never summoned or changed.\n\nBuild / Resume fills vacancies, summons included bots, confirms ALL arrivals, then sets talents/settings and supplies. Raid sizes authorize conversion.\n\nCore v1 (default) uses bot-only discovery, reservations and server arrival confirmation. Legacy is for older cores. Existing bots without a client GUID use legacy commands. Refusals are shown; server rules still apply.\n\nCancel keeps members/completed work; an already-started teleport may finish. Unknown gear results stop safely. Inspect the bot, then /mtprecruit reconcile NAME deliberately permits new prep. See README for saved-checkpoint/restart limits. Closing does not cancel."
+        text="Choose Party or Raid, then Role, Class and Spec for each bot. Auto by role prefers PvE; choose Enhancement/Elemental, Cat/Balance, Holy/Discipline, etc. PvE-only blocks PvP presets unless Allow PvP fallback is selected. Exact builds must exist in the bot\'s server list.\n\nKeep members stay unchanged. Prepare bot opts an existing bot into changes. Build / Resume recruits, summons, confirms all arrivals, then applies talents, verified class profiles, gear and supplies. READY means those checks passed.\n\nProfiles enable class utilities, remove Passive/hold conflicts, and disable optional healer DPS. Support Judgements/totems can still cause damage. In raids only the first tank slot is prepared as puller. Raid size authorizes conversion.\n\nCore v1 is the default; Legacy supports older cores. Cancel keeps members/completed work. Unknown gear results stop safely: inspect, then /mtprecruit reconcile NAME deliberately permits new prep. Closing does not cancel."
     }
 }
 
@@ -742,6 +743,9 @@ local MTPB_SPECS = {
 local MTPB_TALENT_AI_MAP = {
     DRUID = {
         ["pve balance"]="balance", ["pvp balance"]="balance",
+        ["restro pve"]="restoration",
+        ["feral shred pvp"]="dps feral", ["feral 1v1 pvp"]="dps feral",
+        ["pvp feral (mangler)"]="dps feral",
         ["pve feral"]="dps feral", ["pvp feral"]="dps feral",
         ["pve resto"]="restoration", ["pvp resto"]="restoration"
     },
@@ -1346,7 +1350,8 @@ local function MTPB_FindAIForTalentBuild(buildName, requestedClass)
         ["beast mastery"]={"beast mastery","beast"," bm"},
         ["marksmanship"]={"marksmanship","marksman","marks"," mm"},
         ["survival"]={"survival"," surv"},
-        ["assassination"]={"assassination","assasination","assassin"},
+        ["assassination"]={"assassination","assasination","assassin"," assa"},
+        ["subtlety"]={"subtlety"," sub"},
         ["protection"]={"protection"," prot"},
         ["restoration"]={"restoration"," resto"},
         ["discipline"]={"discipline"," disc"},
@@ -1354,7 +1359,7 @@ local function MTPB_FindAIForTalentBuild(buildName, requestedClass)
         ["elemental"]={"elemental"," elem"," ele"},
         ["enhancement"]={"enhancement"," enhance"," enhan"," enh"},
         ["demonology"]={"demonology"," demo"},
-        ["destruction"]={"destruction"," destro"},
+        ["destruction"]={"destruction"," destro"," dest"},
         ["affliction"]={"affliction"," affli"}
     }
     for i = 1, table.getn(specs) do
@@ -1814,7 +1819,7 @@ function ManTechPB_LFGRoleChanged(value,dropdown)
     local slot=ManTechPB_LFG.slots[dropdown.slotIndex]
     slot.role=value; slot.reviewRole=nil; slot.state=nil; slot.readySignature=nil
     slot.supplyDone=nil; slot.prepSignature=nil
-    slot.preference="ANY"; slot.manualCandidate=nil
+    slot.preference="ANY"; slot.spec="AUTO"; slot.manualCandidate=nil
     if not slot.prepareName and not slot.recruited then slot.candidate=nil end
     ManTechPB_LFGRefreshRows()
 end
@@ -1862,7 +1867,11 @@ end
 
 function ManTechPB_LFGInterface()
     local version, build, date, interface = GetBuildInfo()
-    return tonumber(interface) or 11200
+    if tonumber(interface) then return tonumber(interface) end
+    -- Legacy clients may return only the first three GetBuildInfo values.
+    if string.sub(version or "",1,2)=="3." then return 30300 end
+    if string.sub(version or "",1,2)=="2." then return 20400 end
+    return 11200
 end
 
 function ManTechPB_LFGClassAllowed(class)
@@ -1870,7 +1879,7 @@ function ManTechPB_LFGClassAllowed(class)
 end
 
 function ManTechPB_LFGClassCanFill(class, slot)
-    if not class or not slot then return false end
+    if not class or not slot or not ManTechPB_LFGClassAllowed(class) then return false end
     if slot.role == "tank" then
         return class == "WARRIOR" or class == "PALADIN" or class == "DRUID" or class == "DEATHKNIGHT"
     elseif slot.role == "heal" then
@@ -1914,6 +1923,44 @@ function ManTechPB_LFGClassOptions(slot)
         if ManTechPB_LFGClassAllowed(class) then table.insert(values, {value=class, label=ManTechPB_LFGClassLabels[class]}) end
     end
     return values
+end
+
+-- Group job and selected talent family are separate. The server still supplies
+-- the exact talent build; these choices only constrain which one we may apply.
+function ManTechPB_LFGSpecOptions(slot)
+    local class=slot.preference
+    if not MTPB_SPECS[class] then class=slot.candidate and slot.candidate.class end
+    if not class and (slot.prepareName or slot.keepName) then
+        local data=MTPB_BOTS[slot.prepareName or slot.keepName]
+        class=data and data.class
+    end
+    local values={{value="AUTO",label="Auto by role"}}
+    if not class or not ManTechPB_LFGClassAllowed(class) then return values end
+    for _,spec in ipairs(MTPB_SPECS[class] or {}) do
+        if (slot.role=="tank" and spec.role=="tank") or (slot.role=="heal" and spec.role=="heal") or
+            (slot.role=="dps" and (spec.role=="melee" or spec.role=="ranged")) then
+            table.insert(values,{value=spec.strategy,label=spec.name})
+        end
+    end
+    if class=="WARRIOR" and slot.role=="tank" and ManTechPB_LFGInterface()<20000 then
+        table.insert(values,{value="furyprot",label="Fury/Prot hybrid"})
+    end
+    return values
+end
+
+function ManTechPB_LFGSpecChanged(value,dropdown)
+    local s=ManTechPB_LFG
+    local slot=dropdown and s.slots[dropdown.slotIndex]
+    if not slot or s.building or s.searching or ManTechPB_LFGReserved(slot) then return end
+    -- Lock an Auto-class candidate's class if its concrete spec was selected.
+    if value~="AUTO" and not MTPB_SPECS[slot.preference] and slot.candidate then slot.preference=slot.candidate.class end
+    slot.spec=value; slot.build=nil; slot.readySignature=nil; slot.prepSignature=nil; slot.supplyDone=nil; slot.state=nil
+    ManTechPB_LFGRefreshRows()
+end
+
+function ManTechPB_LFGBuildPolicyChanged(value)
+    ManTechPB_LFG.allowPvp=value=="ANY"
+    ManTechPB_LFGSetStatus(value=="ANY" and "PvP fallback allowed when this spec has no PvE build. Exact chosen build is shown during preparation." or "PvE only: unavailable specs stop before talents or gear are changed.")
 end
 
 function ManTechPB_LFGDropdownText(dropdown)
@@ -1987,6 +2034,8 @@ function ManTechPB_LFGPreferenceChanged(index, value)
     local slot = ManTechPB_LFG.slots[index]
     if not slot then return end
     slot.preference = value
+    slot.spec = "AUTO"
+    slot.build=nil; slot.readySignature=nil; slot.prepSignature=nil; slot.supplyDone=nil
     slot.candidate = nil
     ManTechPB_LFGAssignCandidates()
 end
@@ -2109,7 +2158,7 @@ function ManTechPB_LFGRefreshRows()
     local busy=s.building or s.searching
     s.resetButton:SetText(busy and "Cancel" or "Clear search")
     local _,control
-    for _,control in ipairs({s.searchButton,s.buildButton,s.sizeDropdown,s.rangeDropdown}) do
+    for _,control in ipairs({s.searchButton,s.buildButton,s.sizeDropdown,s.rangeDropdown,s.buildPolicy}) do
         if busy then control:Disable() else control:Enable() end
     end
     s.sizeDropdown.value=s.size; s.sizeDropdown:SetText(ManTechPB_LFGDropdownText(s.sizeDropdown))
@@ -2126,7 +2175,7 @@ function ManTechPB_LFGRefreshRows()
     s.summary:SetText(counts.tank.." tank / "..counts.heal.." healer / "..counts.dps.." DPS | "..protected.." kept unchanged / "..(s.size-protected).." bot slots")
     for i=1,8 do
         index=(s.page-1)*8+i; slot=s.slots[index]; row=s.rows[i]
-        for _,control in ipairs({row.label,row.role,row.dropdown,row.source,row.candidate,row.state}) do
+        for _,control in ipairs({row.label,row.role,row.dropdown,row.spec,row.source,row.candidate,row.state}) do
             if slot then control:Show() else control:Hide() end
         end
         if slot then
@@ -2134,17 +2183,20 @@ function ManTechPB_LFGRefreshRows()
             row.role.slotIndex=index; row.role.value=slot.role; row.role:SetText(ManTechPB_LFGDropdownText(row.role))
             row.dropdown.slotIndex=index; row.dropdown.value=slot.preference
             ManTechPB_LFGSetMenu(row.dropdown,ManTechPB_LFGClassOptions(slot))
+            row.spec.slotIndex=index; row.spec.value=slot.spec or "AUTO"
+            ManTechPB_LFGSetMenu(row.spec,ManTechPB_LFGSpecOptions(slot))
             row.source.slotIndex=index; row.source.value=ManTechPB_LFGReserved(slot) and "KEEP" or (slot.prepareName and "PREP" or "AUTO")
             row.source:SetText(ManTechPB_LFGDropdownText(row.source))
             row.candidate.slotIndex=index
             name=slot.key==s.playerSlot and UnitName("player") or slot.keepName or slot.prepareName
             if name then row.candidate:SetText(name)
-            elseif slot.candidate then row.candidate:SetText(slot.candidate.name.." "..(ManTechPB_LFGClassLabels[slot.candidate.class] or "").." "..slot.candidate.level)
+            elseif slot.candidate then row.candidate:SetText(slot.candidate.name.." "..(ManTechPB_LFGClassLabels[slot.candidate.class] or "").." "..(slot.candidate.level or "?"))
             else row.candidate:SetText(busy and "Searching for a candidate..." or "No candidate - click to search") end
             row.state:SetText(slot.reviewRole and "REVIEW ROLE" or (ManTechPB_LFGReserved(slot) and "KEEP" or slot.state or (slot.candidate and "CANDIDATE" or "OPEN")))
-            if busy then row.role:Disable(); row.dropdown:Disable(); row.source:Disable(); row.candidate:Disable()
+            if busy then row.role:Disable(); row.dropdown:Disable(); row.spec:Disable(); row.source:Disable(); row.candidate:Disable()
             else
                 row.role:Enable()
+                if ManTechPB_LFGReserved(slot) then row.spec:Disable() else row.spec:Enable() end
                 if name then row.dropdown:Disable(); row.candidate:Disable() else row.dropdown:Enable(); row.candidate:Enable() end
                 if slot.key==s.playerSlot then row.source:Disable() else row.source:Enable() end
             end
@@ -2274,12 +2326,15 @@ function ManTechPB_LFGHandleWhoResults()
 end
 
 function ManTechPB_LFGFindBuild(slot,data)
+    if not data or not ManTechPB_LFGClassCanFill(data.class,slot) then return nil end
+    if MTPB_SPECS[slot.preference] and slot.preference~=data.class then return nil end
     local best,bestScore,i,build,spec,lower,score
     for i=1,table.getn(data and data.talentBuilds or {}) do
         build=data.talentBuilds[i]; spec=MTPB_FindAIForTalentBuild(build.name,data.class)
         if spec and ((slot.role=="tank" and spec.role=="tank") or (slot.role=="heal" and spec.role=="heal") or
             (slot.role=="dps" and (spec.role=="melee" or spec.role=="ranged"))) and
-            (slot.preference~="MELEE" or spec.role=="melee") and (slot.preference~="RANGED" or spec.role=="ranged") then
+            (slot.preference~="MELEE" or spec.role=="melee") and (slot.preference~="RANGED" or spec.role=="ranged") and
+            ManTechPB_LFGSpecMatches(slot,build,spec) then
             lower,score=string.lower(build.name or ""),0
             if string.find(lower,"pve",1,true) then score=score+20 end
             if string.find(lower,"pvp",1,true) then score=score-20 end
@@ -2287,6 +2342,25 @@ function ManTechPB_LFGFindBuild(slot,data)
         end
     end
     return best
+end
+
+function ManTechPB_LFGSpecMatches(slot,build,spec)
+    local name=string.lower(build.name or "")
+    local requested=slot.spec or "AUTO"
+    local furyprot=false
+    for _,phrase in ipairs(MTPB_TALENT_AI_PRIORITY_RULES.WARRIOR[1].phrases) do
+        if string.find(name,phrase,1,true) then furyprot=true end
+    end
+    if requested=="furyprot" then
+        if ManTechPB_LFGInterface()>=20000 or not furyprot then return false end
+    elseif requested~="AUTO" and (spec.strategy~=requested or (requested=="protection" and furyprot)) then return false end
+    -- PvP-labelled builds require an explicit opt-in. Unlabelled weapon/hybrid
+    -- presets remain usable; farm/joke/ambiguous hybrids are not dungeon defaults.
+    if string.find(name,"pvp",1,true) and not ManTechPB_LFG.allowPvp then return false end
+    if slot.role=="heal" and (spec.strategy=="holy" or spec.strategy=="discipline") and string.find(name,"dps",1,true) then return false end
+    if string.find(name,"farm",1,true) or string.find(name,"(fun)",1,true) or
+        string.find(name,"resto-balance",1,true) or string.find(name,"shockadin",1,true) then return false end
+    return true
 end
 
 -- Tag workflow packets so Cancel also drops commands which have not left the queue.
@@ -2320,57 +2394,94 @@ function ManTechPB_LFGSetStage(stage,label,timeout)
     ManTechPB_LFGRefreshRows()
 end
 
-function ManTechPB_LFGApplyDefaults(slot,name)
-    local spec=slot.build and MTPB_FindAIForTalentBuild(slot.build.name,slot.candidate.class)
-    local commands={}
-    local remove,i=""
-    if spec then
-        local specs=MTPB_SPECS[slot.candidate.class] or {}
-        for i=1,table.getn(specs) do
-            if specs[i].strategy~=spec.strategy then remove=remove..",- "..specs[i].strategy end
-        end
-        remove=string.gsub(remove,",%- ",",-")..",-heal,-tank,-bear"
-        for i=1,4 do
-            local context=({"co","nc","de","react"})[i]
-            if slot.candidate.class~="DEATHKNIGHT" or context=="co" then
-                table.insert(commands,"#a "..context.." "..string.sub(remove,2)..",+"..spec.strategy)
+-- A single contract drives both outgoing changes and READY verification.
+function ManTechPB_LFGProfile(slot,context)
+    if not slot or not slot.candidate or not slot.build then return nil,nil end
+    local class=slot.candidate.class
+    local spec=MTPB_FindAIForTalentBuild(slot.build.name,class)
+    local required,forbidden={},{"passive"}
+    if not spec then return nil,nil end
+    local function need(value) table.insert(required,value) end
+    local function deny(value) table.insert(forbidden,value) end
+    if class~="DEATHKNIGHT" or context=="co" then
+        need(spec.strategy)
+        for _,other in ipairs(MTPB_SPECS[class] or {}) do
+            if other.strategy~=spec.strategy then
+                deny(other.strategy)
+                for _,environment in ipairs({"pve","pvp","raid"}) do deny(other.strategy.." "..environment) end
             end
         end
+        for _,alias in ipairs({"heal","tank","bear","dps"}) do deny(alias) end
     end
-    local co="+dps assist,-tank assist,+close,-ranged,-pull,-pull back,+behind"
-    local nc="+dps assist,-tank assist"
-    if slot.role=="tank" then
-        co="+tank assist,-dps assist,+close,-ranged,+pull,+pull back,-behind"
-        nc="+tank assist,-dps assist"
-    elseif slot.role=="heal" or (spec and spec.role=="ranged") then
-        co="+dps assist,-tank assist,+ranged,-close,-pull,-pull back,-behind"
-    end
-    table.insert(commands,"#a co "..co)
-    table.insert(commands,"#a nc "..nc)
     if slot.role=="heal" then
-        for i=1,2 do table.insert(commands,"#a "..({"co","nc"})[i].." -offdps,-offdps pve,-offdps pvp,-offdps raid") end
+        for _,value in ipairs({"offdps","offdps pve","offdps pvp","offdps raid"}) do deny(value) end
     end
-    local class=slot.candidate and slot.candidate.class
-    if class=="DEATHKNIGHT" then
-        table.insert(commands,"#a co +bdps")
-        table.insert(commands,"#a nc +nc,+food")
-    else
-        table.insert(commands,"#a co +aoe,+boost,+buff")
-        table.insert(commands,"#a nc +aoe,+boost,+buff,+food")
-        if ManTechPB_LFGCanCleanse(class) then
-            table.insert(commands,"#a co +cure"); table.insert(commands,"#a nc +cure")
+    if context=="react" then need("potions")
+    elseif context=="co" or context=="nc" then
+        need(slot.role=="tank" and "tank assist" or "dps assist")
+        deny(slot.role=="tank" and "dps assist" or "tank assist")
+        for _,value in ipairs({"offheal","offheal pve","offheal pvp","offheal raid"}) do deny(value) end
+        if class=="DEATHKNIGHT" then
+            need(context=="co" and "bdps" or "nc")
+            if context=="co" then
+                if spec.strategy=="frost" then need("frost aoe"); deny("unholy aoe")
+                elseif spec.strategy=="unholy" then need("unholy aoe"); deny("frost aoe")
+                else deny("frost aoe"); deny("unholy aoe") end
+            end
+        else
+            need("aoe"); need("boost"); need("buff"); need("cc")
+            if ManTechPB_LFGCanCleanse(class) then need("cure") end
+            if class=="SHAMAN" then need("totems")
+            elseif class=="ROGUE" then need("poisons")
+            elseif class=="HUNTER" then need("pet") end
+        end
+        if context=="nc" then
+            need("food"); need("follow"); deny("stay"); deny("grind")
+        else
+            deny("wait for attack")
+            local ranged=slot.role=="heal" or spec.role=="ranged"
+            need(ranged and "ranged" or "close")
+            deny(ranged and "close" or "ranged")
+            if slot.role=="dps" and not ranged then need("behind") else deny("behind") end
+            -- Threat limiting is a DPS policy, not a veto on rescue healing.
+            if slot.role=="dps" then need("threat") else deny("threat") end
+            local puller=slot.role=="tank"
+            if puller and (ManTechPB_LFG.size or 5)>5 then
+                for _,member in ipairs(ManTechPB_LFG.slots or {}) do
+                    if member.role=="tank" then puller=member==slot; break end
+                end
+            end
+            if puller then need("pull"); need("pull back") else deny("pull"); deny("pull back") end
         end
     end
-    table.insert(commands,"#a react +potions")
-    if spec and slot.candidate.class=="DEATHKNIGHT" then
-        if spec.strategy=="frost" then table.insert(commands,"#a co +frost aoe,-unholy aoe")
-        elseif spec.strategy=="unholy" then table.insert(commands,"#a co +unholy aoe,-frost aoe")
-        else table.insert(commands,"#a co -frost aoe,-unholy aoe") end
-    end
-    for i=1,table.getn(commands) do
+    return required,forbidden
+end
+
+function ManTechPB_LFGApplyDefaults(slot,name)
+    for _,context in ipairs({"co","nc","de","react"}) do
+        local required,forbidden=ManTechPB_LFGProfile(slot,context)
+        if not required then
+            if ManTechPB_LFG.building then ManTechPB_LFGStop("Cannot prepare without a confirmed bot class and matching server build.") end
+            return
+        end
+        local operations={}
+        for _,value in ipairs(forbidden) do table.insert(operations,"-"..value) end
+        for _,value in ipairs(required) do table.insert(operations,"+"..value) end
+        -- Keep each command under the legacy chat packet limit.
+        local chunk="#a "..context.." "
+        for _,operation in ipairs(operations) do
+            if string.len(chunk)+string.len(operation)+1>230 then
+                if ManTechPB_LFG.building then
+                    if not ManTechPB_LFGSend(chunk,name) then return end
+                else MTPB_SendBotCommand(chunk,"WHISPER",nil,name) end
+                chunk="#a "..context.." "
+            end
+            if string.sub(chunk,-1)~=" " then chunk=chunk.."," end
+            chunk=chunk..operation
+        end
         if ManTechPB_LFG.building then
-            if not ManTechPB_LFGSend(commands[i],name) then return end
-        else MTPB_SendBotCommand(commands[i],"WHISPER",nil,name) end
+            if not ManTechPB_LFGSend(chunk,name) then return end
+        else MTPB_SendBotCommand(chunk,"WHISPER",nil,name) end
     end
 end
 
@@ -2379,37 +2490,10 @@ function ManTechPB_LFGCanCleanse(class)
 end
 
 function ManTechPB_LFGSettingsMatch(slot,context,list)
-    local required,forbidden={},{}
-    local spec=MTPB_FindAIForTalentBuild(slot.build.name,slot.candidate.class)
-    if context=="react" then required={"potions"}
-    else
-        required={slot.role=="tank" and "tank assist" or "dps assist"}
-        if slot.candidate.class=="DEATHKNIGHT" then
-            table.insert(required,context=="co" and "bdps" or "nc")
-            if context=="co" and spec.strategy~="blood" then table.insert(required,spec.strategy.." aoe") end
-        else
-            table.insert(required,"aoe"); table.insert(required,"boost"); table.insert(required,"buff")
-            if ManTechPB_LFGCanCleanse(slot.candidate.class) then table.insert(required,"cure") end
-        end
-        forbidden={slot.role=="tank" and "dps assist" or "tank assist"}
-        if context=="nc" then table.insert(required,"food") end
-        if context=="co" or slot.candidate.class~="DEATHKNIGHT" then table.insert(required,spec.strategy) end
-        if context=="co" then
-            if slot.role=="tank" then
-                table.insert(required,"pull"); table.insert(required,"pull back"); table.insert(required,"close")
-                table.insert(forbidden,"ranged"); table.insert(forbidden,"behind")
-            else
-                table.insert(forbidden,"pull"); table.insert(forbidden,"pull back")
-                local ranged=spec.role=="ranged" or spec.role=="heal"
-                table.insert(required,ranged and "ranged" or "close")
-                table.insert(forbidden,ranged and "close" or "ranged")
-            end
-        end
-        if slot.role=="heal" then table.insert(forbidden,"offdps") end
-    end
-    local i
-    for i=1,table.getn(required) do if not MTPB_ListContainsStrategy(list,required[i]) then return false end end
-    for i=1,table.getn(forbidden) do if MTPB_ListContainsStrategy(list,forbidden[i]) then return false end end
+    local required,forbidden=ManTechPB_LFGProfile(slot,context)
+    if not required then return false end
+    for _,value in ipairs(required) do if not MTPB_ListContainsStrategy(list,value) then return false end end
+    for _,value in ipairs(forbidden) do if MTPB_ListContainsStrategy(list,value) then return false end end
     return true
 end
 
@@ -2528,7 +2612,7 @@ function ManTechPB_LFGBeginSlots()
 end
 
 function ManTechPB_LFGReadySignature(slot)
-    return (slot.candidate and slot.candidate.name or "")..":"..slot.role..":"..slot.preference
+    return (slot.candidate and slot.candidate.name or "")..":"..slot.role..":"..slot.preference..":"..(slot.spec or "AUTO")..":profile2"
 end
 
 function ManTechPB_LFGArrival(name)
@@ -2705,8 +2789,9 @@ function ManTechPB_LFGTick(token)
         local data=MTPB_BOTS[name]
         if data and data.talentBuildsServer and data.talentBuildsCollectUntil and GetTime()>data.talentBuildsCollectUntil then
             slot.build=ManTechPB_LFGFindBuild(slot,data)
-            if not slot.build then ManTechPB_LFGStop(name..": no matching server build; talents and gear unchanged."); return end
+            if not slot.build then ManTechPB_LFGStop(name..": no eligible "..(slot.spec or "AUTO").." server build. Check Spec / PvE-only filter. Talents and gear unchanged."); return end
             ManTechPB_LFGSetStage("talents","SPEC",18)
+            ManTechPB_LFGSetStatus(name..": applying "..slot.build.name.." ("..slot.role..").",MTPB_COLORS.yellow)
             s.talentsConfirmed=nil; data.currentTalentBuild=nil
             ManTechPB_LFGSend("talents "..slot.build.name,name,true,"talents")
             s.nextTalentQuery=GetTime()+3+table.getn(MTPB_SEND_QUEUE)*0.35
@@ -2720,11 +2805,12 @@ function ManTechPB_LFGTick(token)
                 ManTechPB_LFGSend("#a co ?",name,false,"co")
                 ManTechPB_LFGSend("#a nc ?",name,false,"nc")
                 ManTechPB_LFGSend("#a react ?",name,false,"react")
+                ManTechPB_LFGSend("#a de ?",name,false,"de")
             end
         elseif s.nextTalentQuery and GetTime()>=s.nextTalentQuery then
             ManTechPB_LFGSend("talents",name,true); s.nextTalentQuery=GetTime()+5
         end
-    elseif s.stage=="settings" and s.confirmed.co and s.confirmed.nc and s.confirmed.react then
+    elseif s.stage=="settings" and s.confirmed.co and s.confirmed.nc and s.confirmed.react and s.confirmed.de then
         s.supplyIndex=0; ManTechPB_LFGSupply()
     elseif s.stage=="supply" and s.supplyConfirmed then ManTechPB_LFGSupply() end
     if s.searching then return end
@@ -2796,31 +2882,77 @@ function ManTechPB_LFGReset()
     ManTechPB_LFGSetStatus("Choices and completed prep kept. Change a slot's role to deliberately prepare it again.",MTPB_COLORS.gray)
 end
 
+-- Short, separate instructions so the first-run workflow is not buried in Help.
+function ManTechPB_ShowLFGInstructions(page)
+    local s=ManTechPB_LFG
+    local pages={
+        {title="Play & go",text="1. Choose your bots' classes under Class / Style.\n   Pick a Spec if you want a particular build type.\n\n2. Click Build / Resume at the bottom.\n\n3. Wait until every included bot says READY and the\n   bottom message confirms preparation is complete.\n\n4. Go play!\n\nThe addon finds bots, invites them one at a time, summons them, then sets their talents, behavior, gear and supplies. You do not need to invite or prepare each bot yourself.\n\nPrepare bot is an inclusion setting, not another step to click after READY. Keep members are left unchanged."},
+        {title="Your slots",text="ROLE\nChoose Tank, Healer or DPS. Make sure your own slot has the role you will play.\n\nCLASS / STYLE AND SPEC\nChoose a class first, then a spec: for example Shaman Enhancement or Elemental, Druid Cat or Balance, Priest Holy or Discipline. Auto by role lets the addon choose an eligible server build.\n\nKEEP MEMBER\nLeave this character untouched. This is always used for you and is the default for existing group members.\n\nPREPARE BOT\nInclude an existing bot in summoning, respec, gear and supplies. Select this only for bots you want changed. Empty slots recruit new bots automatically."},
+        {title="Other options",text="PARTY / RAID\nChoose the desired group size. Raid selection permits party-to-raid conversion. Use Prev / Next to edit more slots. Kept humans count toward the group size.\n\nLEVEL RANGE\n+/- 2 means bots can be two levels below or above you.\n\nBUILDS: PVE ONLY\nThe default blocks PvP-labelled builds. Allow PvP fallback is optional when your server lacks a PvE preset for the chosen spec. No available matching build means preparation stops; it will not silently pick another spec.\n\nPREVIEW SEARCH / PROTOCOL\nPreview is optional; Build / Resume already searches. Leave Protocol on Core v1 for the updated server. Legacy is for older cores."},
+        {title="If it stops",text="READ THE BOTTOM STATUS MESSAGE\nFOUND or CANDIDATE is not READY. The bot still needs to join, arrive and finish preparation. A refusal, missing build or failed check is explained below the rows.\n\nBUILD / RESUME\nAfter resolving the problem, use this to continue. Confirmed work is retained when the plan is unchanged.\n\nCANCEL / CLEAR SEARCH\nCancel stops unsent work; it does not kick bots or undo completed changes. An action already sent can still finish. Closing the window does not cancel. Clear search clears candidates, not your party.\n\nUNCERTAIN GEAR RESULT\nDo not repeatedly restart. Inspect the bot and see Help before clearing a saved preparation checkpoint."}
+    }
+    page=tonumber(page) or 1
+    if not pages[page] then page=1 end
+    if not s.instructions then
+        local f=CreateFrame("Frame","ManTechPBLFGInstructions",UIParent); s.instructions=f
+        f:SetWidth(570); f:SetHeight(470); f:SetFrameStrata("TOOLTIP"); f:EnableMouse(true); f:SetMovable(true); f:SetClampedToScreen(true)
+        f:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=24,insets={left=8,right=8,top=8,bottom=8}})
+        f:SetBackdropColor(0.025,0.035,0.055,0.99); f:SetBackdropBorderColor(0.08,0.58,0.78,1)
+        f:SetPoint("CENTER",UIParent,"CENTER",0,20)
+        if UIParent.GetWidth and UIParent.GetHeight then
+            local w,h=UIParent:GetWidth(),UIParent:GetHeight()
+            if type(w)=="number" and type(h)=="number" and w>400 and h>300 then f:SetScale(math.min(1,(w-24)/570,(h-24)/470)) end
+        end
+        local title=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); title:SetPoint("TOPLEFT",f,"TOPLEFT",20,-17); title:SetText("GROUP BUILDER - INSTRUCTIONS"); ManTechPB_SetReadableFont(title,14,"OUTLINE")
+        local drag=CreateFrame("Button",nil,f); drag:SetPoint("TOPLEFT",f,"TOPLEFT",10,-7); drag:SetPoint("TOPRIGHT",f,"TOPRIGHT",-40,-7); drag:SetHeight(30)
+        drag:RegisterForDrag("LeftButton"); drag:SetScript("OnDragStart",function() f:StartMoving() end); drag:SetScript("OnDragStop",function() f:StopMovingOrSizing() end)
+        local close=CreateFrame("Button",nil,f,"UIPanelCloseButton"); close:SetPoint("TOPRIGHT",f,"TOPRIGHT",3,3); close:SetScript("OnClick",function() f:Hide() end)
+        s.instructionTabs={}
+        for i=1,table.getn(pages) do
+            local tab=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); tab:SetWidth(128); tab:SetHeight(28); tab:SetPoint("TOPLEFT",f,"TOPLEFT",20+(i-1)*134,-48)
+            tab:SetText(pages[i].title); tab.page=i; ManTechPB_StyleButton(tab,12)
+            tab:SetScript("OnClick",function(self) local owner=self or this; ManTechPB_ShowLFGInstructions(owner.page) end)
+            s.instructionTabs[i]=tab
+        end
+        local body=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); s.instructionBody=body
+        body:SetPoint("TOPLEFT",f,"TOPLEFT",24,-94); body:SetWidth(522); body:SetHeight(350); body:SetJustifyH("LEFT"); body:SetJustifyV("TOP"); ManTechPB_SetReadableFont(body,14,"")
+    end
+    s.instructionBody:SetText(pages[page].text)
+    for i=1,table.getn(s.instructionTabs) do
+        if i==page then s.instructionTabs[i]:LockHighlight() else s.instructionTabs[i]:UnlockHighlight() end
+    end
+    s.instructions:Show()
+end
+
 function ManTechPB_CreateLFGFrame()
     ManTechPB_LFGInitialize()
     local s=ManTechPB_LFG
     if s.frame then return end
     local f=CreateFrame("Frame","ManTechPBLFGFrame",UIParent); s.frame=f
-    f:SetWidth(860); f:SetHeight(620); f:SetFrameStrata("DIALOG"); f:SetMovable(true); f:EnableMouse(true); f:SetClampedToScreen(true)
+    f:SetWidth(1000); f:SetHeight(620); f:SetFrameStrata("DIALOG"); f:SetMovable(true); f:EnableMouse(true); f:SetClampedToScreen(true)
     f:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=24,insets={left=8,right=8,top=8,bottom=8}})
     f:SetBackdropColor(0.025,0.035,0.055,0.99); f:SetBackdropBorderColor(0.08,0.58,0.78,1); f:SetPoint("CENTER",UIParent,"CENTER",0,0)
     if UIParent.GetWidth and UIParent.GetHeight then
         local width,height=UIParent:GetWidth(),UIParent:GetHeight()
-        if type(width)=="number" and type(height)=="number" and width>400 and height>300 then f:SetScale(math.min(1,(width-24)/860,(height-24)/620)) end
+        if type(width)=="number" and type(height)=="number" and width>400 and height>300 then f:SetScale(math.min(1,(width-24)/1000,(height-24)/620)) end
     end
-    local drag=CreateFrame("Button",nil,f); drag:SetPoint("TOPLEFT",f,"TOPLEFT",10,-7); drag:SetPoint("TOPRIGHT",f,"TOPRIGHT",-100,-7); drag:SetHeight(32)
+    local drag=CreateFrame("Button","ManTechPBLFGDragRegion",f); drag:SetPoint("TOPLEFT",f,"TOPLEFT",10,-7); drag:SetPoint("TOPRIGHT",f,"TOPRIGHT",-212,-7); drag:SetHeight(32)
     drag:RegisterForDrag("LeftButton"); drag:SetScript("OnDragStart",function() f:StartMoving() end); drag:SetScript("OnDragStop",function() f:StopMovingOrSizing() end)
     local title=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); title:SetPoint("TOPLEFT",f,"TOPLEFT",18,-16); title:SetText("GROUP / RAID BUILDER"); ManTechPB_SetReadableFont(title,14,"OUTLINE")
     local close=CreateFrame("Button",nil,f,"UIPanelCloseButton"); close:SetPoint("TOPRIGHT",f,"TOPRIGHT",3,3); close:SetScript("OnClick",function() ManTechPB_LFGCloseDropdown(); f:Hide() end)
     local help=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); help:SetWidth(48); help:SetHeight(24); help:SetPoint("TOPRIGHT",f,"TOPRIGHT",-36,-10); help:SetText("Help")
     ManTechPB_StyleButton(help,12); help:SetScript("OnClick",function() ManTechPB_ShowHelp("GROUP") end)
-    local intro=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); intro:SetPoint("TOPLEFT",f,"TOPLEFT",20,-47); intro:SetWidth(818); intro:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(intro,12,"")
-    intro:SetText("Fill slots -> summon included bots -> confirm arrival -> spec/settings -> gear/supplies. Keep members are never modified. Choosing a raid size authorizes party-to-raid conversion.")
+    local instructions=CreateFrame("Button","ManTechPBLFGInstructionsButton",f,"UIPanelButtonTemplate")
+    instructions:SetWidth(104); instructions:SetHeight(24); instructions:SetPoint("TOPRIGHT",f,"TOPRIGHT",-92,-10); instructions:SetText("Instructions")
+    ManTechPB_StyleButton(instructions,12); instructions:SetScript("OnClick",function() ManTechPB_ShowLFGInstructions(1) end)
+    local intro=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); intro:SetPoint("TOPLEFT",f,"TOPLEFT",20,-47); intro:SetWidth(958); intro:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(intro,12,"")
+    intro:SetText("Choose Role, Class and Spec -> Build / Resume. Recruit -> summon -> confirm talents/profile -> gear/supplies. Keep members stay unchanged. Raid size authorizes raid conversion.")
     s.sizeDropdown=ManTechPB_CreateLFGDropdown(f,20,-91,156,{{value=5,label="Party (5)"},{value=10,label="Raid (10)"},{value=20,label="Raid (20)"},{value=25,label="Raid (25)"},{value=40,label="Raid (40)"}},s.size,ManTechPB_LFGSetSize)
     s.rangeDropdown=ManTechPB_CreateLFGDropdown(f,190,-91,142,{{value=0,label="Exact level"},{value=1,label="+/- 1 level"},{value=2,label="+/- 2 levels"},{value=3,label="+/- 3 levels"},{value=5,label="+/- 5 levels"}},s.range,ManTechPB_LFGRangeChanged)
-    s.summary=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); s.summary:SetPoint("TOPLEFT",f,"TOPLEFT",348,-92); s.summary:SetWidth(485); s.summary:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(s.summary,12,"")
+    s.buildPolicy=ManTechPB_CreateLFGDropdown(f,348,-91,150,{{value="PVE",label="Builds: PvE only"},{value="ANY",label="Allow PvP fallback"}},s.allowPvp and "ANY" or "PVE",ManTechPB_LFGBuildPolicyChanged)
+    s.summary=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); s.summary:SetPoint("TOPLEFT",f,"TOPLEFT",510,-92); s.summary:SetWidth(468); s.summary:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(s.summary,12,"")
     local i,h
-    local headers={{"#",20},{"ROLE",49},{"CLASS / STYLE",154},{"INCLUDE / KEEP",300},{"MEMBER / CANDIDATE",445},{"STATE",730}}
+    local headers={{"#",20},{"ROLE",49},{"CLASS / STYLE",154},{"SPEC",298},{"INCLUDE / KEEP",442},{"MEMBER / CANDIDATE",575},{"STATE",870}}
     for i=1,table.getn(headers) do
         h=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); h:SetPoint("TOPLEFT",f,"TOPLEFT",headers[i][2],-134); h:SetText(headers[i][1]); ManTechPB_SetReadableFont(h,11,"OUTLINE")
     end
@@ -2831,13 +2963,15 @@ function ManTechPB_CreateLFGFrame()
         row.label=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); row.label:SetPoint("TOPLEFT",f,"TOPLEFT",20,y-6); ManTechPB_SetReadableFont(row.label,12,"")
         row.role=ManTechPB_CreateLFGDropdown(f,46,y,99,{{value="tank",label="Tank"},{value="heal",label="Healer"},{value="dps",label="DPS"}},"dps",ManTechPB_LFGRoleChanged)
         row.dropdown=ManTechPB_CreateLFGDropdown(f,152,y,140,{{value="ANY",label="Any DPS"}},"ANY",ManTechPB_LFGPreferenceDropdownChanged)
-        row.source=ManTechPB_CreateLFGDropdown(f,299,y,138,{{value="AUTO",label="Recruit bot"},{value="KEEP",label="Keep member"},{value="PREP",label="Prepare bot"}},"AUTO",ManTechPB_LFGSourceChanged)
+        row.spec=ManTechPB_CreateLFGDropdown(f,297,y,138,{{value="AUTO",label="Auto by role"}},"AUTO",ManTechPB_LFGSpecChanged)
+        row.source=ManTechPB_CreateLFGDropdown(f,442,y,125,{{value="AUTO",label="Recruit bot"},{value="KEEP",label="Keep member"},{value="PREP",label="Prepare bot"}},"AUTO",ManTechPB_LFGSourceChanged)
         if i>4 then
             row.dropdown.menu:ClearAllPoints(); row.dropdown.menu:SetPoint("BOTTOMLEFT",row.dropdown,"TOPLEFT",0,1)
+            row.spec.menu:ClearAllPoints(); row.spec.menu:SetPoint("BOTTOMLEFT",row.spec,"TOPLEFT",0,1)
         end
-        row.candidate=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); row.candidate:SetWidth(279); row.candidate:SetHeight(26); row.candidate:SetPoint("TOPLEFT",f,"TOPLEFT",444,y)
+        row.candidate=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); row.candidate:SetWidth(288); row.candidate:SetHeight(26); row.candidate:SetPoint("TOPLEFT",f,"TOPLEFT",574,y)
         ManTechPB_StyleButton(row.candidate,12); row.candidate:SetScript("OnClick",ManTechPB_LFGCandidateClicked); row.candidate:SetScript("OnEnter",ManTechPB_LFGCandidateTooltip); row.candidate:SetScript("OnLeave",function() GameTooltip:Hide() end)
-        row.state=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); row.state:SetPoint("TOPLEFT",f,"TOPLEFT",731,y-6); row.state:SetWidth(107); row.state:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(row.state,11,"OUTLINE")
+        row.state=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); row.state:SetPoint("TOPLEFT",f,"TOPLEFT",870,y-6); row.state:SetWidth(107); row.state:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(row.state,11,"OUTLINE")
     end
     local prev=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); prev:SetWidth(80); prev:SetHeight(26); prev:SetPoint("TOPLEFT",f,"TOPLEFT",20,-468); prev:SetText("< Prev"); ManTechPB_StyleButton(prev,12); prev:SetScript("OnClick",function() ManTechPB_LFGPage(-1) end)
     s.pageLabel=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); s.pageLabel:SetPoint("TOPLEFT",f,"TOPLEFT",118,-475); ManTechPB_SetReadableFont(s.pageLabel,12,"")

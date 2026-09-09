@@ -1,4 +1,19 @@
-ManTechPB 0.9.2
+ManTechPB 0.10.0
+
+0.10.0: Group Builder now has separate Class and Spec selectors.
+Instructions beside Help opens the quick Play & go guide, plus tabs explaining
+slots, other options and what to do if preparation stops.
+Select the spec you want (for example Enhancement vs Elemental or Cat vs Balance), then
+Build / Resume. PvE-only is the default; Allow PvP fallback is explicit for
+versions/specs whose server catalogue only supplies a PvP build. Unlabelled
+weapon and supported hybrid presets remain eligible. No silent spec switching.
+Preparation and READY share one checked profile, including class utilities,
+positioning, no Passive/hold conflicts, and optional healer DPS disabled.
+Totems, poisons and hunter pet maintenance are enabled where appropriate.
+Combat, noncombat, reaction and dead settings are checked. In a raid only
+the first tank slot is configured to pull. Keep members remain untouched.
+Healer support Judgements/totems may still cause damage; this is not a
+promise to prevent every damaging action in the core. No core changes needed.
 
 ManTechPB is a standalone CMaNGOS PlayerBots manager. It does not require the
 Mangosbot addon and does not overwrite it.

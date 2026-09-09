@@ -236,7 +236,7 @@ local function command(text,name)
             local names={}
             for key in pairs(values) do table.insert(names,key) end
             if scenario.rejectSettings and context=="co" then table.insert(names,"offdps raid") end
-            local label=({co="Combat",nc="Non Combat",react="Reaction"})[context]
+            local label=({co="Combat",nc="Non Combat",react="Reaction",de="Dead"})[context]
             later(function() emit("CHAT_MSG_WHISPER",label.." Strategies: "..table.concat(names,", "),name) end)
         end
     elseif string.sub(text,1,5)==".bot " then

@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.9.2 |
-| The Burning Crusade | 20400 | 0.9.2-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.9.2-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.10.0 |
+| The Burning Crusade | 20400 | 0.10.0-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.10.0-WotLK.1 |
 
 ## Installation
 
@@ -21,6 +21,39 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 Open the manager with `/mtp`, `/mantechpb`, or the minimap button. Each version folder also contains a detailed `README.txt`.
 
 ## Group / Raid Builder
+
+### New in 0.10.0: explicit specs and verified class profiles
+
+Choose **Role → Class → Spec**, then **Build / Resume**. Shaman DPS can be
+Enhancement or Elemental; Druid DPS can be Cat or Balance; Priest healers can be
+Holy or Discipline. All supported class/spec families have a selector. Classic
+also exposes Fury/Prot separately from Protection; Death Knights are Wrath-only.
+The bot's live server talent list remains authoritative. Missing selected specs
+stop before talent/gear changes rather than silently selecting another spec.
+
+**Builds: PvE only** excludes PvP-labelled presets by default. Choose **Allow PvP
+fallback** deliberately where the server only provides a PvP build (for example
+bundled Classic Enhancement). Unlabelled weapon/hybrid presets remain eligible;
+farm/ambiguous hybrid presets are excluded from automated dungeon preparation.
+Exact selected talent names appear during preparation. No universal best-DPS
+claim is made for the server's preset ordering.
+
+Configuration and READY now use the same required/forbidden class profile:
+positioning, assist, buff/cooldown/CC utilities, cleanse where supported, food,
+potions, Shaman totems, Rogue poisons and Hunter pet maintenance. Passive/hold
+conflicts and incompatible spec flags are removed and checked, including dead
+and reaction contexts. Optional healer DPS is disabled. Paladin support
+Judgements and Shaman totems may still cause damage; the addon does not impose
+a core-wide damage veto. Only the first tank slot is configured as raid puller.
+
+The **Instructions** button beside Help opens a short **Play & go** guide:
+choose classes/specs, press Build / Resume, wait for READY, then play. Separate
+tabs explain slots, other options, and what to do if preparation stops.
+
+The release includes an offline test fixture of all 258 bundled preset names
+from the ManTech PlayerBots fork, plus class-profile and UI regression tests.
+Client runtime and per-class live combat testing remain distinct from these
+mocked tests. The profile changes do not modify PlayerBots core code.
 
 Open **LFG** or `/mtp lfg`. Choose Party (5) or a 10/20/25/40-slot raid plan. Edit tank/healer/DPS roles and bot class/style preferences on the paged rows. A raid plan is a requested group size, not a claim that every dungeon supports that size.
 
