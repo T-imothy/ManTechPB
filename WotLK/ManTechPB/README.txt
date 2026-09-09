@@ -1,4 +1,4 @@
-ManTechPB 0.7.0
+ManTechPB 0.7.1
 
 ManTechPB is a standalone CMaNGOS PlayerBots manager. It does not require the
 Mangosbot addon and does not overwrite it.
@@ -28,7 +28,7 @@ Design goals:
 - separate Group Builder window opened by LFG or /mtp lfg
 - five-role composition editor with one player role and four bot slots
 - per-slot tank, healer, DPS class/style preferences and selectable level range
-- staged /who search with visible, cycleable candidate names before invites
+- one-click, paced /who discovery with bot-response checks before invitations
 - automatic server talent-build selection, role sync, gearing, supplies, tank pull/assist, and healer-DPS-off defaults
 
 Open ManTechPB with /mtp, /mantechpb, or its movable minimap button.
@@ -45,20 +45,41 @@ manager's own background command traffic is hidden.
 
 GROUP BUILDER
 -------------
-Click LFG in the main title bar or use /mtp lfg. Choose the role your own
-character fills, choose a class or damage style for the other four slots, and
-select a level range. Search /who fills the four bot slots with online candidates.
-Click a candidate name to cycle through other matches, then click Build Group.
+Open LFG or /mtp lfg. Choose your own role, four class/style preferences and
+a level range. Click Build Group once. It searches, verifies bot replies, invites,
+confirms talents and settings, then generates gear and adds supplies in sequence.
+No manual invites are needed. At level 43 with +/-2, Warrior searches use
+/who c-"Warrior" 41-45. Results display here; the Blizzard Who window need not open.
 
-After the selected characters join, ManTechPB processes them in sequence. It asks each bot for this
-server's real talent builds, chooses a PvE-compatible build for the assigned role,
-synchronizes the AI role, generates gear, and prepares supplies. Tank slots receive
-Tank Assist, Pull, and Pull Back. Healer slots receive Damage Assist and explicitly
-remove every Healer DPS/offdps variant.
+Search /who is an optional preview. Empty rows search that role; named rows cycle
+candidates. Build Group searches afresh and honors manually cycled names if still
+available. Queries are spaced at least eight seconds apart, retry once on timeout,
+and stop on missing replies. Avoid manual /who and other Who-search addons while
+building: the legacy protocol has no request IDs.
 
-WoW's normal /who result does not say whether a character is a PlayerBot. Verify
-the four displayed names before clicking Build Group; ordinary players can appear
-in the same class and level results.
+Who results are not proof of bot identity. The builder requests the normal bot
+"who" response before inviting; nonresponders and bots reporting another master
+are skipped, with at most 24 checks per run. Busy bots may be skipped. This is
+protocol recognition, not authenticated discovery.
+
+The selected server talent build must match the assigned role and confirm before
+role changes. Gear follows confirmed settings. Food, potions, consumes, reagents
+and ammo each wait for their server acknowledgement. Tank gets Tank Assist,
+Pull and Pull Back. Healer gets a healing preset and Healer DPS OFF. Supported
+AoE, cooldowns, buffs, cleansing, food/drink and potions are enabled. Death Knight
+controls use class-specific strategies. READY means all stages were confirmed.
+
+Start solo or lead a compatible partial bot party outside combat, raids and BGs.
+One slot is you; the other four must be bots. Existing members must fit the choices
+and answer as available bots; nobody is kicked automatically. The server must
+allow talent/gear/supply commands. The addon cannot bypass these permissions,
+create missing talent presets or guarantee unlimited inventory/equipment.
+
+Refusals and timeouts STOP further setup with an explanation. Cancel discards
+unsent steps, but does not remove joined bots or undo completed changes. Closing
+this window does not cancel. A new Build Group repeats setup, including random
+gear. Other addon commands are paused during the run to avoid conflicts.
+The builder does not summon bots to the dungeon.
 
 Select one bot and open Setup > Talents. ManTechPB asks that bot for the exact
 predefined builds configured on the current server; it never invents a cross-version
