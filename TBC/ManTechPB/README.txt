@@ -1,4 +1,12 @@
-ManTechPB 0.10.0
+ManTechPB 0.10.1
+
+0.10.1: Spec now lists exact talent builds for every supported class/job in
+Classic, TBC and Wrath, with separate Auto choices. Classic Warrior tanks
+include pve prot, furyprot, furyprot (slam), and furyprot (demo shout).
+Long menus are paged and show full names; hover the selected row for details.
+Version-specific catalogue choices are verified against the bot's live list
+before applying. Missing exact choices stop rather than silently substituting.
+Identically named builds share one choice because the server command uses names.
 
 0.10.0: Group Builder now has separate Class and Spec selectors.
 Instructions beside Help opens the quick Play & go guide, plus tabs explaining

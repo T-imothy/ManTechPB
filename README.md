@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.10.0 |
-| The Burning Crusade | 20400 | 0.10.0-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.10.0-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.10.1 |
+| The Burning Crusade | 20400 | 0.10.1-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.10.1-WotLK.1 |
 
 ## Installation
 
@@ -21,6 +21,25 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 Open the manager with `/mtp`, `/mantechpb`, or the minimap button. Each version folder also contains a detailed `README.txt`.
 
 ## Group / Raid Builder
+
+### New in 0.10.1: exact builds for every class and version
+
+The **Spec** menu now lists **exact talent build names**, followed by **Auto**
+family choices. Classic Warrior tanks can explicitly choose `pve prot`,
+`furyprot`, `furyprot (slam)`, or `furyprot (demo shout)`. The same rule applies
+to all supported classes/jobs across Classic, TBC and Wrath, using separate
+version catalogues rather than assuming every expansion has the same builds.
+
+Long menus have Next/Previous pages and full-name labels. Hover the selected
+row to see an abbreviated name in full. Before a bot is known, choices use the
+bundled PlayerBots catalogue; a known bot's completed live talent list takes
+precedence. Preparation always rechecks that live list. If the exact selected
+build is missing, preparation stops without changing talents or gear—there is
+no silent substitution. Keep members are unchanged; choose Prepare bot if you
+intend to apply a build to an existing bot. PvP-labelled builds still require
+the explicit PvP option. Specialised/farming builds excluded from Auto can be
+chosen explicitly when their mapped role matches. Duplicate names share one
+choice because the server talent command cannot distinguish them by name.
 
 ### New in 0.10.0: explicit specs and verified class profiles
 

@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.10.0"
+local MTPB_VERSION = "0.10.1"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -627,7 +627,7 @@ local MTPB_HELP_PAGES = {
     },
     GROUP = {
         title="Group Builder",
-        text="Choose Party or Raid, then Role, Class and Spec for each bot. Auto by role prefers PvE; choose Enhancement/Elemental, Cat/Balance, Holy/Discipline, etc. PvE-only blocks PvP presets unless Allow PvP fallback is selected. Exact builds must exist in the bot\'s server list.\n\nKeep members stay unchanged. Prepare bot opts an existing bot into changes. Build / Resume recruits, summons, confirms all arrivals, then applies talents, verified class profiles, gear and supplies. READY means those checks passed.\n\nProfiles enable class utilities, remove Passive/hold conflicts, and disable optional healer DPS. Support Judgements/totems can still cause damage. In raids only the first tank slot is prepared as puller. Raid size authorizes conversion.\n\nCore v1 is the default; Legacy supports older cores. Cancel keeps members/completed work. Unknown gear results stop safely: inspect, then /mtprecruit reconcile NAME deliberately permits new prep. Closing does not cancel."
+        text="Choose Party or Raid, then Role, Class and Spec for each bot. Spec lists exact build names and Auto families. Choose the exact variant you want; menus have pages and full names. PvE-only blocks PvP presets unless Allow PvP fallback is selected. Exact builds must exist in the bot\'s server list.\n\nKeep members stay unchanged. Prepare bot opts an existing bot into changes. Build / Resume recruits, summons, confirms all arrivals, then applies talents, verified class profiles, gear and supplies. READY means those checks passed.\n\nProfiles enable class utilities, remove Passive/hold conflicts, and disable optional healer DPS. Support Judgements/totems can still cause damage. In raids only the first tank slot is prepared as puller. Raid size authorizes conversion.\n\nCore v1 is the default; Legacy supports older cores. Cancel keeps members/completed work. Unknown gear results stop safely: inspect, then /mtprecruit reconcile NAME deliberately permits new prep. Closing does not cancel."
     }
 }
 
@@ -1636,6 +1636,9 @@ if type(MTPB_TEST_HOOKS) == "table" then
     MTPB_TEST_HOOKS.GetCurrentTalentBuild = function(bot)
         return MTPB_BOTS[bot] and MTPB_BOTS[bot].currentTalentBuild
     end
+    MTPB_TEST_HOOKS.SetTalentBuildFixture = function(bot,class,builds)
+        MTPB_BOTS[bot]={class=class,talentBuilds=builds,talentBuildsServer=true}
+    end
 end
 
 -- Global workflow helpers avoid capturing excessive upvalues in Vanilla Lua.
@@ -1645,6 +1648,331 @@ ManTechPB_LFGClassLabels = {
     WARRIOR="Warrior", PALADIN="Paladin", HUNTER="Hunter", ROGUE="Rogue",
     PRIEST="Priest", SHAMAN="Shaman", MAGE="Mage", WARLOCK="Warlock",
     DRUID="Druid", DEATHKNIGHT="Death Knight"
+}
+
+-- Version-specific discovery catalogue from PlayerBots 662fe10d. The live
+-- bot's talents list is authoritative before any exact build is applied.
+local MTPB_LFG_BUILD_CATALOG = {
+    Classic = {
+        ROGUE = {
+            "pve dps assasination",
+            "pve dps combat",
+            "pve dps combat (swords)",
+            "pve dps combat (daggers)",
+            "pve dps combat (daggers2)",
+            "pve dps combat",
+            "pvp dps combat (swords)",
+            "pvp dps combat (daggers)",
+            "pvp dps combat (daggers2)",
+            "pvp dps combat",
+        },
+        WARRIOR = {
+            "pve arms",
+            "pve fury",
+            "pve prot",
+            "pvp arms",
+            "pvp fury",
+            "pvp prot",
+            "fury slam",
+            "arms axes",
+            "arms maces",
+            "arms swords",
+            "arms polearms",
+            "furyprot",
+            "furyprot (slam)",
+            "furyprot (demo shout)",
+            "2h fury",
+            "fury no deep wounds",
+        },
+        PALADIN = {
+            "pve dps ret (basic ret)",
+            "pve dps ret (geared ret)",
+            "pve heal holy (sanctuary)",
+            "pve heal holy (prot! holy shock taunt)",
+            "pvp heal holy",
+            "pvp heal Holy",
+            "pvp tank prot",
+            "pvp dps ret",
+            "pvp dps ret (Loaded Reck Bomb)",
+        },
+        HUNTER = {
+            "pve dps mm (mm/sv)",
+            "pve dps mm (mm/bm)",
+            "pve dps mm (mm/sv)",
+            "pve dps bm (farmer)",
+            "pve dps mm",
+            "pvp dps surv",
+            "pvp dps mm",
+            "pvp dps bm",
+        },
+        PRIEST = {
+            "pve heal disc",
+            "pve heal holy",
+            "pve dps shadow",
+            "pvp dps disc",
+            "pvp heal holy",
+            "pvp dps shadow",
+        },
+        SHAMAN = {
+            "pve dps elem (elemental mastery)",
+            "pve dps elem (nature's swiftness)",
+            "pve dps elem (force of nature + hand of edward the odd)",
+            "pve heal resto (pure)",
+            "pve heal resto (melee support resto)",
+            "pvp dps elem (nature's swiftness)",
+            "pvp dps elem (elemental mastery)",
+            "pvp dps elem (elemental mastery)",
+            "pvp dps enhan (2hand)",
+            "pvp heal resto",
+        },
+        MAGE = {
+            "pve dps arcane",
+            "pve dps fire",
+            "pve dps frost (winter’s chill spec)",
+            "pve dps frost (frost build for farming)",
+            "pve dps frost (frost-arcane)",
+            "pve dps frost (fun)",
+            "pve dps frost (aoe farm)",
+            "pve dps arcane (glass cannon)",
+            "pve dps frost",
+            "pvp dps frost",
+            "pvp dps frost (frosted fun)",
+            "pvp dps arcane (venruki)",
+        },
+        WARLOCK = {
+            "pve dps demo (ds/ruin)",
+            "pve dps demo (succubus sacrifice)",
+            "pve dps dest (imp lord)",
+            "pve dps demo (sm/ruin)",
+            "pve dps affli",
+            "pvp dps demo (sl)",
+            "pvp dps demo (soul link/ shadowburn)",
+            "pvp dps demo (soul link/ nightfall)",
+            "pvp dps affli (sm/ruin)",
+            "pvp dps affli (drakedog)",
+            "pvp dps affli (sm/ruin)",
+            "pvp dps destro (conflagrate)",
+        },
+        DRUID = {
+            "pve dps feral",
+            "pve dps feral (dps/tank hybrid)",
+            "pve dps resto (swiftmend spec)",
+            "pve dps resto (regrowth spec bear aoe farm)",
+            "pve dps resto (resto-balance)",
+            "pvp dps resto (swiftmend / feral charge)",
+            "pvp dps resto",
+            "pvp dps feral (heart of the wild / ns)",
+            "pvp dps balance (moonfury)",
+            "pvp dps balance (boomkin)",
+        },
+    },
+    TBC = {
+        WARRIOR = {
+            "pve arms",
+            "pve fury",
+            "pve prot",
+            "pvp arms",
+            "pvp fury",
+            "pvp prot",
+            "fury slam",
+            "arms poleaxes",
+            "arms maces",
+            "arms swords",
+        },
+        PALADIN = {
+            "pve holy",
+            "pve dps ret",
+            "pve prot",
+            "pve prot",
+            "pvp heal holy",
+            "pvp holy + ret (shockadin)",
+            "pvp holy + prot",
+            "pvp dps ret (ret-recko)",
+            "pvp dps ret (Loaded Reck Bomb)",
+            "pvp dps ret",
+        },
+        HUNTER = {
+            "pve dps mm",
+            "pve dps bm",
+            "pve survival",
+            "pvp dps bm (mortalshots)",
+            "pvp dps bm",
+            "pvp dps mm",
+            "pvp dps surv (scatter+imp rev)",
+            "pvp dps surv (max agi)",
+            "pvp dps surv (bg)",
+        },
+        ROGUE = {
+            "pve assassination",
+            "pve assassination v2",
+            "pve dps combat",
+            "pve dps combat",
+            "pvp dps sub (ambush)",
+            "pvp dps sub (backstab+ambush)",
+            "pvp dps combat (harp)",
+            "pvp dps assa (deep)",
+            "pvp dps assa (dual wield)",
+            "pvp dps assa (elusive)",
+            "pvp dps assa (mutilate)",
+            "pvp dps assa (mutilate deep)",
+            "pvp dps sub (shadowstep)",
+            "pvp dps sub (expose armor)",
+        },
+        PRIEST = {
+            "pve heal disc",
+            "pve heal holy",
+            "pve dps shadow",
+            "pvp dps disc",
+            "pvp dps holy",
+            "pvp dps shadow",
+        },
+        SHAMAN = {
+            "pve dps elem",
+            "pve dps enh",
+            "pve resto",
+            "pve resto",
+            "pve resto",
+            "pvp dps elem",
+            "pvp dps elem",
+            "pvp dps elem",
+            "pvp dps enhan",
+            "pvp dps enhan",
+            "pvp dps enhan",
+            "pvp heal resto",
+            "pvp heal resto",
+            "pvp dps enhan (shock)",
+        },
+        MAGE = {
+            "pve dps arcane",
+            "pve dps fire",
+            "pve dps frost",
+            "pvp dps arcane",
+            "pvp dps arcane",
+            "pvp dps arcane (missiles)",
+            "pvp dps fire",
+            "pvp dps fire",
+            "pvp dps frost",
+            "pvp dps (frostfire)",
+            "pvp dps arcane (pom + pyro)",
+        },
+        WARLOCK = {
+            "pve dps destro",
+            "pve dps destro",
+            "pve dps affli",
+            "pvp dps affli (shadowburn)",
+            "pvp dps affli",
+            "pvp dps demo",
+            "pvp dps demo",
+            "pvp dps demo",
+            "pvp dps destro",
+            "pvp dps destro",
+            "pvp dps destro",
+            "pvp dps destro (instant bolts+shadowfury)",
+            "pvp dps destro (instant bolts+siphon life)",
+            "pvp dps demo",
+            "pvp dps affli",
+        },
+        DRUID = {
+            "pve dps balance",
+            "pve dps feral cat",
+            "pve dps feral tank",
+            "pve resto",
+            "pvp dps balance",
+            "pvp dps balance",
+            "pvp dps balance (mana reg)",
+            "pvp resto (high range)",
+            "pvp resto (low range)",
+            "pvp resto (tree of life)",
+            "pvp resto (restokin)",
+            "pvp feral cat",
+            "pvp feral (mangler)",
+        },
+    },
+    WotLK = {
+        WARRIOR = {
+            "pve arms",
+            "pve fury",
+            "pve prot",
+            "pvp arms",
+            "pvp fury",
+            "pvp prot",
+        },
+        PALADIN = {
+            "Ret Pvp",
+            "Prot Pvp",
+            "Holy Pvp",
+            "Ret Pve",
+            "Prot Pve",
+            "Holy Pve",
+        },
+        HUNTER = {
+            "BM Pvp",
+            "MM Pvp",
+            "Surv Pvp",
+            "BM Pve",
+            "MM Pve",
+            "Surv Pve",
+        },
+        ROGUE = {
+            "Assassination Pvp",
+            "Combat Pvp",
+            "Subtlety Pvp",
+            "Assassination Pve",
+            "Combat Pve",
+            "Subtlety Pve",
+        },
+        PRIEST = {
+            "Shadow PvE",
+            "Shadow PvP",
+            "Disc PvE",
+            "Disc PvE renew build",
+            "Holy PvE",
+            "Holy PvP",
+        },
+        DEATHKNIGHT = {
+            "Blood Pvp",
+            "Unholy Pvp",
+            "Frost Pvp",
+            "Blood Pve",
+            "Unholy Pve",
+            "Frost Pve",
+        },
+        SHAMAN = {
+            "Enh Pvp",
+            "Ele Pvp",
+            "Resto Pvp",
+            "Enh Pve",
+            "Ele Pve",
+            "Resto Pve",
+        },
+        MAGE = {
+            "Arcane Pvp",
+            "Fire Pvp",
+            "Frost Pvp",
+            "Arcane Pve",
+            "Fire Pve",
+            "Frost Arcane Pve",
+        },
+        WARLOCK = {
+            "Affli CoE Pvp",
+            "Affli CoA Pvp",
+            "Destro Pvp",
+            "Demo Pve",
+            "Affli Pve",
+            "Destro Pve",
+            "Demo Pve",
+        },
+        DRUID = {
+            "Feral shred Pvp",
+            "Feral 1v1 Pvp",
+            "Balance Pvp",
+            "Resto Pvp",
+            "Feral dps Pve",
+            "Feral Tank Pve",
+            "Balance Pve",
+            "Restro Pve",
+        },
+    },
 }
 
 function ManTechPB_LFGInitialize()
@@ -1819,7 +2147,7 @@ function ManTechPB_LFGRoleChanged(value,dropdown)
     local slot=ManTechPB_LFG.slots[dropdown.slotIndex]
     slot.role=value; slot.reviewRole=nil; slot.state=nil; slot.readySignature=nil
     slot.supplyDone=nil; slot.prepSignature=nil
-    slot.preference="ANY"; slot.spec="AUTO"; slot.manualCandidate=nil
+    slot.preference="ANY"; slot.spec="AUTO"; slot.buildChoice=nil; slot.manualCandidate=nil
     if not slot.prepareName and not slot.recruited then slot.candidate=nil end
     ManTechPB_LFGRefreshRows()
 end
@@ -1841,8 +2169,17 @@ end
 
 function ManTechPB_LFGSetMenu(dropdown,values)
     dropdown.values=values; dropdown.options=dropdown.options or {}
+    local total=table.getn(values)
+    local paged=type(dropdown.pageSize)=="number"
+    local size=paged and dropdown.pageSize or math.max(1,total)
+    local pages=math.max(1,math.ceil(total/size))
+    dropdown.menuPage=math.max(1,math.min(pages,type(dropdown.menuPage)=="number" and dropdown.menuPage or 1))
+    local first=(dropdown.menuPage-1)*size
+    local visible=math.min(size,total-first)
+    local width=type(dropdown.menuWidth)=="number" and dropdown.menuWidth or dropdown:GetWidth()
+    dropdown.menu:SetWidth(width)
     local i,option
-    for i=1,table.getn(values) do
+    for i=1,visible do
         option=dropdown.options[i]
         if not option then
             option=CreateFrame("Button",nil,dropdown.menu,"UIPanelButtonTemplate")
@@ -1850,11 +2187,33 @@ function ManTechPB_LFGSetMenu(dropdown,values)
             option:SetPoint("TOPLEFT",dropdown.menu,"TOPLEFT",3,-3-(i-1)*22)
             ManTechPB_StyleButton(option,11); option:SetScript("OnClick",ManTechPB_LFGSelectDropdown)
         end
-        option.value=values[i].value; option.label=values[i].label; option.dropdown=dropdown
+        option:SetWidth(width-6)
+        option.value=values[first+i].value; option.label=values[first+i].label; option.dropdown=dropdown
         option:SetText(option.label); option:Show()
     end
-    for i=table.getn(values)+1,table.getn(dropdown.options) do dropdown.options[i]:Hide() end
-    dropdown.menu:SetHeight(table.getn(values)*22+6)
+    for i=visible+1,table.getn(dropdown.options) do dropdown.options[i]:Hide() end
+    dropdown.menu:SetHeight(visible*22+6+(pages>1 and 28 or 0))
+    if paged and dropdown.pageControlsCreated~=true then
+        local previous=CreateFrame("Button",nil,dropdown.menu,"UIPanelButtonTemplate")
+        local nextPage=CreateFrame("Button",nil,dropdown.menu,"UIPanelButtonTemplate")
+        dropdown.pagePrevious=previous; dropdown.pageNext=nextPage
+        dropdown.pageControlsCreated=true
+        previous:SetWidth(110); previous:SetHeight(24); previous:SetText("< Previous")
+        nextPage:SetWidth(130); nextPage:SetHeight(24)
+        ManTechPB_StyleButton(previous,11); ManTechPB_StyleButton(nextPage,11)
+        previous:SetScript("OnClick",function() dropdown.menuPage=dropdown.menuPage-1; ManTechPB_LFGSetMenu(dropdown,dropdown.values) end)
+        nextPage:SetScript("OnClick",function() dropdown.menuPage=dropdown.menuPage+1; ManTechPB_LFGSetMenu(dropdown,dropdown.values) end)
+    end
+    if dropdown.pageControlsCreated==true then
+        if pages>1 then
+            dropdown.pagePrevious:ClearAllPoints(); dropdown.pagePrevious:SetPoint("TOPLEFT",dropdown.menu,"TOPLEFT",4,-visible*22-4)
+            dropdown.pageNext:ClearAllPoints(); dropdown.pageNext:SetPoint("TOPRIGHT",dropdown.menu,"TOPRIGHT",-4,-visible*22-4)
+            dropdown.pageNext:SetText("Next >  "..dropdown.menuPage.."/"..pages)
+            dropdown.pagePrevious:Show(); dropdown.pageNext:Show()
+            if dropdown.menuPage>1 then dropdown.pagePrevious:Enable() else dropdown.pagePrevious:Disable() end
+            if dropdown.menuPage<pages then dropdown.pageNext:Enable() else dropdown.pageNext:Disable() end
+        else dropdown.pagePrevious:Hide(); dropdown.pageNext:Hide() end
+    end
     dropdown:SetText(ManTechPB_LFGDropdownText(dropdown))
 end
 
@@ -1936,14 +2295,35 @@ function ManTechPB_LFGSpecOptions(slot)
     end
     local values={{value="AUTO",label="Auto by role"}}
     if not class or not ManTechPB_LFGClassAllowed(class) then return values end
+    local data=MTPB_BOTS[slot.prepareName or slot.keepName or (slot.candidate and slot.candidate.name) or ""]
+    local builds={}
+    if data and data.class==class and data.talentBuildsServer and data.talentBuilds and
+        (not data.talentBuildsCollectUntil or GetTime()>data.talentBuildsCollectUntil) then
+        builds=data.talentBuilds
+    else
+        local interface=ManTechPB_LFGInterface()
+        local track=interface>=30000 and "WotLK" or (interface>=20000 and "TBC" or "Classic")
+        for _,name in ipairs(MTPB_LFG_BUILD_CATALOG[track][class] or {}) do table.insert(builds,{name=name}) end
+    end
+    local seen={}
+    for _,build in ipairs(builds) do
+        local key=MTPB_NormalizeTalentBuildName(build.name)
+        -- An explicit selection may choose a specialised/farming hybrid that
+        -- Auto excludes. Still require a matching class/job and the PvP policy.
+        local probe={role=slot.role,preference=class,spec="AUTO",buildChoice=build.name}
+        if not seen[key] and ManTechPB_LFGFindBuild(probe,{class=class,talentBuilds={build}}) then
+            table.insert(values,{value="BUILD:"..build.name,label=build.name})
+            seen[key]=true
+        end
+    end
     for _,spec in ipairs(MTPB_SPECS[class] or {}) do
         if (slot.role=="tank" and spec.role=="tank") or (slot.role=="heal" and spec.role=="heal") or
             (slot.role=="dps" and (spec.role=="melee" or spec.role=="ranged")) then
-            table.insert(values,{value=spec.strategy,label=spec.name})
+            table.insert(values,{value=spec.strategy,label="Auto: "..spec.name})
         end
     end
     if class=="WARRIOR" and slot.role=="tank" and ManTechPB_LFGInterface()<20000 then
-        table.insert(values,{value="furyprot",label="Fury/Prot hybrid"})
+        table.insert(values,{value="furyprot",label="Auto: Fury/Prot hybrid"})
     end
     return values
 end
@@ -1954,7 +2334,12 @@ function ManTechPB_LFGSpecChanged(value,dropdown)
     if not slot or s.building or s.searching or ManTechPB_LFGReserved(slot) then return end
     -- Lock an Auto-class candidate's class if its concrete spec was selected.
     if value~="AUTO" and not MTPB_SPECS[slot.preference] and slot.candidate then slot.preference=slot.candidate.class end
-    slot.spec=value; slot.build=nil; slot.readySignature=nil; slot.prepSignature=nil; slot.supplyDone=nil; slot.state=nil
+    slot.buildChoice=nil
+    if string.sub(value,1,6)=="BUILD:" then
+        slot.buildChoice=string.sub(value,7)
+        slot.spec="AUTO"
+    else slot.spec=value end
+    slot.build=nil; slot.readySignature=nil; slot.prepSignature=nil; slot.supplyDone=nil; slot.state=nil
     ManTechPB_LFGRefreshRows()
 end
 
@@ -1964,6 +2349,11 @@ function ManTechPB_LFGBuildPolicyChanged(value)
 end
 
 function ManTechPB_LFGDropdownText(dropdown)
+    if type(dropdown.pageSize)=="number" and type(dropdown.value)=="string" and string.sub(dropdown.value,1,6)=="BUILD:" then
+        local name=string.sub(dropdown.value,7)
+        if string.len(name)>20 then return string.sub(name,1,18).."..." end
+        return name
+    end
     local i, entry
     for i = 1, table.getn(dropdown.values or {}) do
         entry = dropdown.values[i]
@@ -1995,7 +2385,9 @@ function ManTechPB_CreateLFGDropdown(parent, x, y, width, values, selected, chan
         local owner = self or this
         if ManTechPB_LFG.building or ManTechPB_LFG.searching then return end
         if owner.menu:IsVisible() then ManTechPB_LFGCloseDropdown(); return end
-        ManTechPB_LFGCloseDropdown(); owner.menu:Show(); ManTechPB_LFG.openMenu = owner.menu
+        ManTechPB_LFGCloseDropdown()
+        if type(owner.pageSize)=="number" then owner.menuPage=1; ManTechPB_LFGSetMenu(owner,owner.values) end
+        owner.menu:Show(); ManTechPB_LFG.openMenu = owner.menu
     end)
     local menu = CreateFrame("Frame", nil, parent)
     button.menu = menu; menu:SetFrameStrata("TOOLTIP"); menu:SetWidth(width); menu:SetHeight(table.getn(values)*22+6)
@@ -2035,6 +2427,7 @@ function ManTechPB_LFGPreferenceChanged(index, value)
     if not slot then return end
     slot.preference = value
     slot.spec = "AUTO"
+    slot.buildChoice = nil
     slot.build=nil; slot.readySignature=nil; slot.prepSignature=nil; slot.supplyDone=nil
     slot.candidate = nil
     ManTechPB_LFGAssignCandidates()
@@ -2042,6 +2435,17 @@ end
 
 function ManTechPB_LFGPreferenceDropdownChanged(value, dropdown)
     if dropdown and dropdown.slotIndex then ManTechPB_LFGPreferenceChanged(dropdown.slotIndex, value) end
+end
+
+function ManTechPB_LFGSpecTooltip(button)
+    button=button or this
+    local slot=button and ManTechPB_LFG.slots[button.slotIndex or 0]
+    if not slot then return end
+    GameTooltip:SetOwner(button,"ANCHOR_RIGHT")
+    GameTooltip:SetText(slot.buildChoice or "Choose an exact server build",1,0.82,0.35)
+    GameTooltip:AddLine("Exact names choose one build. Auto entries choose within a family.",1,1,1,true)
+    GameTooltip:AddLine("Choices use this client version's catalogue, or the bot's live list when available. The live list is checked again before applying.",0.6,0.85,1,true)
+    GameTooltip:Show()
 end
 
 function ManTechPB_LFGCandidateClicked(button)
@@ -2183,7 +2587,7 @@ function ManTechPB_LFGRefreshRows()
             row.role.slotIndex=index; row.role.value=slot.role; row.role:SetText(ManTechPB_LFGDropdownText(row.role))
             row.dropdown.slotIndex=index; row.dropdown.value=slot.preference
             ManTechPB_LFGSetMenu(row.dropdown,ManTechPB_LFGClassOptions(slot))
-            row.spec.slotIndex=index; row.spec.value=slot.spec or "AUTO"
+            row.spec.slotIndex=index; row.spec.value=slot.buildChoice and ("BUILD:"..slot.buildChoice) or slot.spec or "AUTO"
             ManTechPB_LFGSetMenu(row.spec,ManTechPB_LFGSpecOptions(slot))
             row.source.slotIndex=index; row.source.value=ManTechPB_LFGReserved(slot) and "KEEP" or (slot.prepareName and "PREP" or "AUTO")
             row.source:SetText(ManTechPB_LFGDropdownText(row.source))
@@ -2334,7 +2738,8 @@ function ManTechPB_LFGFindBuild(slot,data)
         if spec and ((slot.role=="tank" and spec.role=="tank") or (slot.role=="heal" and spec.role=="heal") or
             (slot.role=="dps" and (spec.role=="melee" or spec.role=="ranged"))) and
             (slot.preference~="MELEE" or spec.role=="melee") and (slot.preference~="RANGED" or spec.role=="ranged") and
-            ManTechPB_LFGSpecMatches(slot,build,spec) then
+            ManTechPB_LFGSpecMatches(slot,build,spec) and
+            (not slot.buildChoice or MTPB_NormalizeTalentBuildName(build.name)==MTPB_NormalizeTalentBuildName(slot.buildChoice)) then
             lower,score=string.lower(build.name or ""),0
             if string.find(lower,"pve",1,true) then score=score+20 end
             if string.find(lower,"pvp",1,true) then score=score-20 end
@@ -2358,8 +2763,8 @@ function ManTechPB_LFGSpecMatches(slot,build,spec)
     -- presets remain usable; farm/joke/ambiguous hybrids are not dungeon defaults.
     if string.find(name,"pvp",1,true) and not ManTechPB_LFG.allowPvp then return false end
     if slot.role=="heal" and (spec.strategy=="holy" or spec.strategy=="discipline") and string.find(name,"dps",1,true) then return false end
-    if string.find(name,"farm",1,true) or string.find(name,"(fun)",1,true) or
-        string.find(name,"resto-balance",1,true) or string.find(name,"shockadin",1,true) then return false end
+    if not slot.buildChoice and (string.find(name,"farm",1,true) or string.find(name,"(fun)",1,true) or
+        string.find(name,"resto-balance",1,true) or string.find(name,"shockadin",1,true)) then return false end
     return true
 end
 
@@ -2612,7 +3017,7 @@ function ManTechPB_LFGBeginSlots()
 end
 
 function ManTechPB_LFGReadySignature(slot)
-    return (slot.candidate and slot.candidate.name or "")..":"..slot.role..":"..slot.preference..":"..(slot.spec or "AUTO")..":profile2"
+    return (slot.candidate and slot.candidate.name or "")..":"..slot.role..":"..slot.preference..":"..(slot.spec or "AUTO")..":"..(slot.buildChoice or "AUTO")..":profile2"
 end
 
 function ManTechPB_LFGArrival(name)
@@ -2789,7 +3194,7 @@ function ManTechPB_LFGTick(token)
         local data=MTPB_BOTS[name]
         if data and data.talentBuildsServer and data.talentBuildsCollectUntil and GetTime()>data.talentBuildsCollectUntil then
             slot.build=ManTechPB_LFGFindBuild(slot,data)
-            if not slot.build then ManTechPB_LFGStop(name..": no eligible "..(slot.spec or "AUTO").." server build. Check Spec / PvE-only filter. Talents and gear unchanged."); return end
+            if not slot.build then ManTechPB_LFGStop(name..": no eligible "..(slot.buildChoice or slot.spec or "AUTO").." server build. Check Spec / PvE-only filter. Talents and gear unchanged."); return end
             ManTechPB_LFGSetStage("talents","SPEC",18)
             ManTechPB_LFGSetStatus(name..": applying "..slot.build.name.." ("..slot.role..").",MTPB_COLORS.yellow)
             s.talentsConfirmed=nil; data.currentTalentBuild=nil
@@ -2886,8 +3291,8 @@ end
 function ManTechPB_ShowLFGInstructions(page)
     local s=ManTechPB_LFG
     local pages={
-        {title="Play & go",text="1. Choose your bots' classes under Class / Style.\n   Pick a Spec if you want a particular build type.\n\n2. Click Build / Resume at the bottom.\n\n3. Wait until every included bot says READY and the\n   bottom message confirms preparation is complete.\n\n4. Go play!\n\nThe addon finds bots, invites them one at a time, summons them, then sets their talents, behavior, gear and supplies. You do not need to invite or prepare each bot yourself.\n\nPrepare bot is an inclusion setting, not another step to click after READY. Keep members are left unchanged."},
-        {title="Your slots",text="ROLE\nChoose Tank, Healer or DPS. Make sure your own slot has the role you will play.\n\nCLASS / STYLE AND SPEC\nChoose a class first, then a spec: for example Shaman Enhancement or Elemental, Druid Cat or Balance, Priest Holy or Discipline. Auto by role lets the addon choose an eligible server build.\n\nKEEP MEMBER\nLeave this character untouched. This is always used for you and is the default for existing group members.\n\nPREPARE BOT\nInclude an existing bot in summoning, respec, gear and supplies. Select this only for bots you want changed. Empty slots recruit new bots automatically."},
+        {title="Play & go",text="1. Choose your bots' classes under Class / Style.\n   Pick an exact build under Spec, or leave an Auto choice.\n\n2. Click Build / Resume at the bottom.\n\n3. Wait until every included bot says READY and the\n   bottom message confirms preparation is complete.\n\n4. Go play!\n\nThe addon finds bots, invites them one at a time, summons them, then sets their talents, behavior, gear and supplies. You do not need to invite or prepare each bot yourself.\n\nPrepare bot is an inclusion setting, not another step to click after READY. Keep members are left unchanged."},
+        {title="Your slots",text="ROLE\nChoose Tank, Healer or DPS. Make sure your own slot has the role you will play.\n\nCLASS / STYLE AND SPEC\nChoose a class, then an exact build under Spec (for example furyprot (slam)). Auto entries choose by role/family instead. Use Next / Previous for more builds; hover a selected build to read its full name. The bot must offer the exact choice on its live list.\n\nKEEP MEMBER\nLeave this character untouched. This is always used for you and is the default for existing group members.\n\nPREPARE BOT\nInclude an existing bot in summoning, respec, gear and supplies. Select this only for bots you want changed. Empty slots recruit new bots automatically."},
         {title="Other options",text="PARTY / RAID\nChoose the desired group size. Raid selection permits party-to-raid conversion. Use Prev / Next to edit more slots. Kept humans count toward the group size.\n\nLEVEL RANGE\n+/- 2 means bots can be two levels below or above you.\n\nBUILDS: PVE ONLY\nThe default blocks PvP-labelled builds. Allow PvP fallback is optional when your server lacks a PvE preset for the chosen spec. No available matching build means preparation stops; it will not silently pick another spec.\n\nPREVIEW SEARCH / PROTOCOL\nPreview is optional; Build / Resume already searches. Leave Protocol on Core v1 for the updated server. Legacy is for older cores."},
         {title="If it stops",text="READ THE BOTTOM STATUS MESSAGE\nFOUND or CANDIDATE is not READY. The bot still needs to join, arrive and finish preparation. A refusal, missing build or failed check is explained below the rows.\n\nBUILD / RESUME\nAfter resolving the problem, use this to continue. Confirmed work is retained when the plan is unchanged.\n\nCANCEL / CLEAR SEARCH\nCancel stops unsent work; it does not kick bots or undo completed changes. An action already sent can still finish. Closing the window does not cancel. Clear search clears candidates, not your party.\n\nUNCERTAIN GEAR RESULT\nDo not repeatedly restart. Inspect the bot and see Help before clearing a saved preparation checkpoint."}
     }
@@ -2964,6 +3369,8 @@ function ManTechPB_CreateLFGFrame()
         row.role=ManTechPB_CreateLFGDropdown(f,46,y,99,{{value="tank",label="Tank"},{value="heal",label="Healer"},{value="dps",label="DPS"}},"dps",ManTechPB_LFGRoleChanged)
         row.dropdown=ManTechPB_CreateLFGDropdown(f,152,y,140,{{value="ANY",label="Any DPS"}},"ANY",ManTechPB_LFGPreferenceDropdownChanged)
         row.spec=ManTechPB_CreateLFGDropdown(f,297,y,138,{{value="AUTO",label="Auto by role"}},"AUTO",ManTechPB_LFGSpecChanged)
+        row.spec.pageSize=8; row.spec.menuWidth=390
+        row.spec:SetScript("OnEnter",ManTechPB_LFGSpecTooltip); row.spec:SetScript("OnLeave",function() GameTooltip:Hide() end)
         row.source=ManTechPB_CreateLFGDropdown(f,442,y,125,{{value="AUTO",label="Recruit bot"},{value="KEEP",label="Keep member"},{value="PREP",label="Prepare bot"}},"AUTO",ManTechPB_LFGSourceChanged)
         if i>4 then
             row.dropdown.menu:ClearAllPoints(); row.dropdown.menu:SetPoint("BOTTOMLEFT",row.dropdown,"TOPLEFT",0,1)

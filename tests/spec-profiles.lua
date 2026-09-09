@@ -136,4 +136,73 @@ for i=2,4 do
 end
 ManTechPBLFGInstructionsButton.scripts.OnClick(ManTechPBLFGInstructionsButton)
 assert(ManTechPB_LFG.instructionBody:GetText()==quick,"Instructions should always open at quick start")
+local warriorOptions=ManTechPB_LFGSpecOptions({role="tank",preference="WARRIOR"})
+assert(option(warriorOptions,"BUILD:pve prot"),"exact Protection build missing")
+assert(not option(warriorOptions,"BUILD:pve arms") and not option(warriorOptions,"BUILD:pve fury"),"tank menu includes warrior DPS builds")
+local warriorDps=ManTechPB_LFGSpecOptions({role="dps",preference="WARRIOR"})
+assert(not option(warriorDps,"BUILD:pve prot") and not option(warriorDps,"BUILD:furyprot (slam)"),"DPS menu includes tank builds")
+for _,class in ipairs({"DRUID","PALADIN","PRIEST","SHAMAN","WARRIOR"}) do
+    for _,role in ipairs({"tank","heal","dps"}) do
+        for _,item in ipairs(ManTechPB_LFGSpecOptions({role=role,preference=class})) do
+            if string.sub(item.value,1,6)=="BUILD:" then
+                local mapped=MTPB_TEST_HOOKS.FindAIForTalentBuild(class,string.sub(item.value,7))
+                assert((role=="tank" and mapped.role=="tank") or (role=="heal" and mapped.role=="heal") or
+                    (role=="dps" and (mapped.role=="melee" or mapped.role=="ranged")),"wrong-role build shown: "..item.label)
+            end
+        end
+    end
+end
+for _,name in ipairs({"furyprot","furyprot (slam)","furyprot (demo shout)"}) do
+    assert(option(warriorOptions,"BUILD:"..name)==(interface<20000),"wrong expansion catalogue for "..name)
+end
+local choice={role="tank",preference="WARRIOR",spec="AUTO",buildChoice="furyprot (slam)"}
+local live={class="WARRIOR",talentBuilds={{name="pve prot"},{name="furyprot"},{name="furyprot (slam)"},{name="furyprot (demo shout)"}}}
+assert(ManTechPB_LFGFindBuild(choice,live).name=="furyprot (slam)","exact hybrid choice ignored")
+table.remove(live.talentBuilds,3)
+assert(not ManTechPB_LFGFindBuild(choice,live),"missing exact build silently substituted")
+local covered={}
+ManTechPB_LFG.allowPvp=true
+for _,entry in ipairs(dofile("ManTechPB-public/tests/preset-names.lua")) do
+    if entry[1]==track then
+        local class=classes[entry[2]]
+        local spec=MTPB_TEST_HOOKS.FindAIForTalentBuild(class,entry[3])
+        local role=(spec.role=="melee" or spec.role=="ranged") and "dps" or spec.role
+        local exact={role=role,preference=class,spec="AUTO",buildChoice=entry[3]}
+        -- Only list builds that can actually be selected for this job.
+        if ManTechPB_LFGFindBuild(exact,{class=class,talentBuilds={{name=entry[3]}}}) then
+            local present=false
+            for _,item in ipairs(ManTechPB_LFGSpecOptions(exact)) do
+                if string.lower(item.value)==string.lower("BUILD:"..entry[3]) then present=true end
+            end
+            assert(present,"catalogue omitted "..entry[3])
+            covered[class]=true
+        end
+    end
+end
+for _,class in pairs(classes) do
+    if class~="DEATHKNIGHT" or interface>=30000 then assert(covered[class],"class missing exact options: "..class) end
+end
+ManTechPB_LFG.allowPvp=false
+MTPB_TEST_HOOKS.SetTalentBuildFixture("Custombot","WARRIOR",{{name="pve fury realm custom"}})
+local custom={role="dps",preference="WARRIOR",candidate={name="Custombot",class="WARRIOR"}}
+local customOptions=ManTechPB_LFGSpecOptions(custom)
+assert(option(customOptions,"BUILD:pve fury realm custom") and not option(customOptions,"BUILD:pve arms"),"live list did not replace catalogue")
+local menu=ManTechPB_LFG.rows[1].spec
+local many={}
+for i=1,23 do table.insert(many,{value="BUILD:pve fury variant "..i,label="pve fury variant "..i}) end
+ManTechPB_LFGSetMenu(menu,many)
+assert(menu.menu:GetWidth()==390 and menu.menu:GetHeight()<=210,"build menu not bounded/readable")
+assert(menu.options[1].value==many[1].value and menu.pageNext.enabled,"build menu first page incorrect")
+menu.pageNext.scripts.OnClick()
+assert(menu.options[1].value==many[9].value,"next build page failed")
+menu.pageNext.scripts.OnClick()
+assert(menu.options[1].value==many[17].value and not menu.pageNext.enabled,"last build page failed")
+menu.pagePrevious.scripts.OnClick()
+assert(menu.options[1].value==many[9].value,"previous build page failed")
+ManTechPB_LFG.slots={tank,second}; tank.keepName=nil; tank.spec="AUTO"
+ManTechPB_LFGSpecChanged("BUILD:pve prot",{slotIndex=1})
+assert(tank.buildChoice=="pve prot" and not tank.readySignature,"exact choice was not saved / checkpoint invalidated")
+ManTechPB_LFGSpecChanged("AUTO",{slotIndex=1})
+assert(not tank.buildChoice,"Auto did not clear exact choice")
+print("Exact-build regression passed: all classes/catalogues, four Classic Warrior tank builds, live override, no substitution, paging and checkpoint invalidation.")
 print("Spec/profile regression passed: "..track..", "..count.." real presets; exact spec/PvP filtering, version gates, "..table.getn(profiles).." role profiles, four-context checks, packet limits, raid puller and UI layout.")
