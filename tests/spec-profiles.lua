@@ -213,5 +213,30 @@ ManTechPB_LFGSpecChanged("BUILD:pve prot",{slotIndex=1})
 assert(tank.buildChoice=="pve prot" and not tank.readySignature,"exact choice was not saved / checkpoint invalidated")
 ManTechPB_LFGSpecChanged("AUTO",{slotIndex=1})
 assert(not tank.buildChoice,"Auto did not clear exact choice")
+local savedFaction=UnitFactionGroup
+local savedSlots=ManTechPB_LFG.slots
+for _,faction in ipairs({"Alliance","Horde"}) do
+    UnitFactionGroup=function() return faction,"Localized faction" end
+    local blocked=faction=="Alliance" and "SHAMAN" or "PALADIN"
+    local allowed=faction=="Alliance" and "PALADIN" or "SHAMAN"
+    for _,role in ipairs({"tank","heal","dps"}) do
+        local slot={role=role,preference="ANY"}
+        local options=ManTechPB_LFGClassOptions(slot)
+        assert(interface>=20000 or not option(options,blocked),"Classic opposing-faction class exposed")
+    end
+    assert(ManTechPB_LFGRecruitClassAllowed(blocked)==(interface>=20000),"wrong expansion faction restriction")
+    assert(ManTechPB_LFGRecruitClassAllowed(allowed))
+    local recruit={role="heal",preference=blocked}
+    ManTechPB_LFG.slots={recruit}
+    assert(has(ManTechPB_LFGSearchClasses(),blocked)==(interface>=20000),"search includes restricted class")
+    assert(ManTechPB_LFGCandidateMatches({class=blocked},recruit)==(interface>=20000),"cached restricted class accepted")
+    if interface<20000 then assert(table.getn(ManTechPB_LFGSpecOptions(recruit))==1,"restricted class specs exposed") end
+    recruit.prepareName="ExistingFriend"
+    assert(ManTechPB_LFGCandidateMatches({class=blocked},recruit),"existing cross-faction member blocked")
+    assert(ManTechPB_LFGClassAllowed(blocked),"general bot management lost cross-faction support")
+end
+UnitFactionGroup=savedFaction
+ManTechPB_LFG.slots=savedSlots
+print("Faction class regression passed: Alliance/Horde menus, search, stale candidates, expansion gates and existing members.")
 print("Exact-build regression passed: all classes/catalogues, four Classic Warrior tank builds, live override, no substitution, paging and checkpoint invalidation.")
 print("Spec/profile regression passed: "..track..", "..count.." real presets; exact spec/PvP filtering, version gates, "..table.getn(profiles).." role profiles, four-context checks, packet limits, raid puller and UI layout.")

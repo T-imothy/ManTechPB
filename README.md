@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.10.2 |
-| The Burning Crusade | 20400 | 0.10.2-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.10.2-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.10.3 |
+| The Burning Crusade | 20400 | 0.10.3-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.10.3-WotLK.1 |
 
 ## Installation
 
@@ -21,6 +21,15 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 Open the manager with `/mtp`, `/mantechpb`, or the minimap button. Each version folder also contains a detailed `README.txt`.
 
 ## Group / Raid Builder
+
+### New in 0.10.3: Classic faction-aware class choices
+
+Classic recruitment hides Shaman for Alliance and Paladin for Horde, including
+searches and cached class selections. TBC and Wrath retain both classes on both
+factions. Existing cross-faction members can still be managed and kept unchanged.
+This is class filtering, not a faction filter for every bot: recruitment still
+uses the server's existing cross-faction policy, including its GM exception.
+No core or server configuration changes are included.
 
 ### New in 0.10.2: simpler Spec menu
 

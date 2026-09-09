@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.10.2"
+local MTPB_VERSION = "0.10.3"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -2237,6 +2237,18 @@ function ManTechPB_LFGClassAllowed(class)
     return class ~= "DEATHKNIGHT" or ManTechPB_LFGInterface() >= 30000
 end
 
+-- Recruitment choices follow the player's native faction. Do not change
+-- general class support: existing cross-faction members can still be managed.
+function ManTechPB_LFGRecruitClassAllowed(class)
+    if not ManTechPB_LFGClassAllowed(class) then return false end
+    if ManTechPB_LFGInterface() < 20000 then
+        local faction=UnitFactionGroup and UnitFactionGroup("player")
+        if faction=="Alliance" and class=="SHAMAN" then return false end
+        if faction=="Horde" and class=="PALADIN" then return false end
+    end
+    return true
+end
+
 function ManTechPB_LFGClassCanFill(class, slot)
     if not class or not slot or not ManTechPB_LFGClassAllowed(class) then return false end
     if slot.role == "tank" then
@@ -2253,6 +2265,7 @@ end
 
 function ManTechPB_LFGCandidateMatches(candidate, slot)
     if not candidate or not slot or not ManTechPB_LFGClassCanFill(candidate.class, slot) then return false end
+    if not slot.keepName and not slot.prepareName and not ManTechPB_LFGRecruitClassAllowed(candidate.class) then return false end
     if ManTechPB_LFG.rejected and ManTechPB_LFG.rejected[candidate.name] then return false end
     if candidate.level and math.abs(candidate.level-(UnitLevel("player") or 1))>ManTechPB_LFG.range then return false end
     if slot.preference == "ANY" then return true end
@@ -2279,7 +2292,7 @@ function ManTechPB_LFGClassOptions(slot)
     local i, class
     for i = 1, table.getn(classes) do
         class = classes[i]
-        if ManTechPB_LFGClassAllowed(class) then table.insert(values, {value=class, label=ManTechPB_LFGClassLabels[class]}) end
+        if ManTechPB_LFGRecruitClassAllowed(class) then table.insert(values, {value=class, label=ManTechPB_LFGClassLabels[class]}) end
     end
     return values
 end
@@ -2295,6 +2308,7 @@ function ManTechPB_LFGSpecOptions(slot)
     end
     local values={{value="AUTO",label="Auto by role"}}
     if not class or not ManTechPB_LFGClassAllowed(class) then return values end
+    if not slot.keepName and not slot.prepareName and not ManTechPB_LFGRecruitClassAllowed(class) then return values end
     local data=MTPB_BOTS[slot.prepareName or slot.keepName or (slot.candidate and slot.candidate.name) or ""]
     local builds={}
     if data and data.class==class and data.talentBuildsServer and data.talentBuilds and

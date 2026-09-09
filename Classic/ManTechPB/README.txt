@@ -1,4 +1,9 @@
-ManTechPB 0.10.2
+ManTechPB 0.10.3
+
+0.10.3: Classic recruitment hides Shaman for Alliance and Paladin for Horde.
+TBC/Wrath retain both. Existing cross-faction members remain manageable.
+This filters class choices, not every bot's faction; recruitment still uses
+the server's cross-faction policy and GM exception. No core changes included.
 
 0.10.2: Spec now offers just Auto by role and role-appropriate exact builds.
 Removed redundant Auto family entries across Classic, TBC and Wrath.
