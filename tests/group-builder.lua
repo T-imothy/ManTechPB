@@ -229,6 +229,8 @@ function SendChatMessage(text,chat,lang,name) command(text,name) end
 function SendAddonMessage(prefix,text,chat,name) command(text,name) end
 
 dofile(arg[1])
+dofile((string.gsub(arg[1],"ManTechPB.lua$","Recruitment.lua")))
+ManTechPB_Recruit.db().mode="legacy"
 for _,f in ipairs(frames) do if f.events.CHAT_MSG_SYSTEM then events=f end end
 assert(events,"main event handler missing")
 ManTechPB_LFGInitialize()
@@ -457,3 +459,196 @@ ManTechPB_LFGBuildGroup(); run()
 assert(raidActive and table.getn(party)==9,"solo-to-raid conversion did not fill ten slots")
 candidates.MAGE=savedMages
 print("Mixed raid/summon tests passed: arrival barrier, dead/refused summons, resume, human protection, invite replacement, 40 slots, 37 bots, two class queries.")
+
+-- Core v1 transport simulator: native movement/inventory are mocks, not live realm tests.
+local R=ManTechPB_Recruit
+local receipts,mutations,requests,coreNear,byGuid,byName={},{},{},{},{},{}
+local function v1reset(options)
+    reset(options)
+    R.active=nil; R.cancels={}; R.cancelIds={}; R.touched={}; R.known={}; R.supported=nil; R.lastDiscovery=nil
+    R.db().mode="v1"; R.db().journal={}
+    receipts={}; mutations={}; requests={}; coreNear={}; byGuid={}; byName={}
+    local n=100
+    for _,list in pairs(candidates) do for _,c in ipairs(list) do
+        if c.name~="Humanwar" then n=n+1; byGuid[tostring(n)]=c; byName[c.name]=tostring(n) end
+    end end
+end
+local function response(id,guid,state,result)
+    return "PBRECRUIT 1 "..id.." "..guid.." "..state.." "..result
+end
+local function deliver(messages)
+    later(function() for _,message in ipairs(messages) do emit("CHAT_MSG_SYSTEM",message) end end)
+end
+local function v1command(text)
+    local _,_,id,kind,args=string.find(text,"^%.bot recruit v1 ([%w_%-]+) (%a+) (.+)$")
+    if not id then return false end
+    local _,_,guid,extra=string.find(args,"^(%d+)%s*(.*)$")
+    local bot=byGuid[guid]; local name=bot and bot.name
+    table.insert(requests,{id=id,kind=kind,args=args,time=GetTime(),name=name})
+    if scenario.noV1Reply then return true end
+    if receipts[id] then
+        assert(receipts[id].payload==kind.." "..args,"ID reused for changed payload")
+        if not scenario.loseAllPrep or kind~="prepare" then deliver(receipts[id].messages) end
+        return true
+    end
+    local messages={}
+    local function reply(state,result,g) table.insert(messages,response(id,g or guid,state,result)) end
+    if scenario.rateLimit and not scenario.didLimit and kind=="discover" then
+        scenario.didLimit=true; reply("refused","discovery_rate_limit","0")
+    elseif kind=="discover" then
+        local _,_,cls,low,high,cursor=string.find(args,"^(%d+) (%d+) (%d+) (%d+)$")
+        local list={}
+        for g,c in pairs(byGuid) do if R.classes[c.class]==tonumber(cls) then table.insert(list,{g=g,c=c}) end end
+        table.sort(list,function(a,b) return tonumber(a.g)<tonumber(b.g) end)
+        local nextCursor="0"; local found=0
+        for _,v in ipairs(list) do
+            if tonumber(v.g)>tonumber(cursor) then
+                if found>=1 then nextCursor=messages[1] and string.gsub(messages[1],"^PBRECRUIT 1 %S+ (%d+).*$","%1") or "0"; break end
+                reply("eligible","ok "..v.c.name.." "..cls.." "..v.c.level,v.g); found=found+1
+            end
+        end
+        reply("complete","cursor="..nextCursor..";scanned="..found,"0")
+    elseif kind=="status" then
+        if ManTechPB_LFGMember(name) then reply(coreNear[name] and "arrived" or "joined",coreNear[name] and "ok" or "not_nearby")
+        else reply("eligible","ok") end
+    elseif kind=="reserve" then reply("reserved","expires_in=15")
+    elseif kind=="invite" then
+        if scenario.fullRace then reply("refused","group_full")
+        else
+            reply("invite_pending","ok")
+            later(function() InviteByName(name); emit("CHAT_MSG_SYSTEM",response(id,guid,"joined","ok")) end)
+        end
+    elseif kind=="summon" then
+        reply("summon_pending","teleport_started")
+        if not scenario.noArrival then
+            later(function()
+                nearby[name]=true
+                if not scenario.clientOnlyArrival then coreNear[name]=true; emit("CHAT_MSG_SYSTEM",response(id,guid,"arrived","ok")) end
+            end)
+        end
+    elseif kind=="prepare" then
+        assert(coreNear[name],"structured prep sent before authoritative arrival")
+        mutations[name]=mutations[name] or {}; mutations[name][extra]=(mutations[name][extra] or 0)+1
+        local results={gear="random gear equipped",food="food added",potions="potions added",consumes="consumables added",reagents="reagents added",ammo="ok"}
+        reply("complete",results[extra])
+    elseif kind=="cancel" then reply("cancelled",scenario.cancelTransfer and "transfer_may_complete" or "completed_work_kept")
+    else error("Unexpected v1 operation "..kind) end
+    receipts[id]={payload=kind.." "..args,messages=messages}
+    if kind=="prepare" and ((scenario.loseGear and extra=="gear") or scenario.loseAllPrep) then return true end
+    if scenario.reordered and kind=="discover" then
+        local reversed={}
+        for i=table.getn(messages),1,-1 do table.insert(reversed,messages[i]) end
+        deliver(reversed)
+    else deliver(messages) end
+    return true
+end
+function SendChatMessage(text,chat,lang,name) if not v1command(text) then command(text,name) end end
+
+v1reset({loseGear=true,rateLimit=true})
+ManTechPB_LFGBuildGroup(); run()
+assert(table.getn(party)==4,"v1 did not fill party: "..(ManTechPB_LFG.status.text or ""))
+for i=1,4 do assert(ManTechPB_LFG.slots[i].state=="READY","v1 slot not ready: "..i.." "..(ManTechPB_LFG.status.text or "")) end
+for name,ops in pairs(mutations) do for kind,count in pairs(ops) do assert(count==1,"lost acknowledgment duplicated "..kind) end end
+local lastDiscovery=-100; local discoveryIds={}; local gearIds={}
+for _,q in ipairs(requests) do
+    if q.kind=="discover" then assert(q.time-lastDiscovery>=1.99,"discovery not paced"); lastDiscovery=q.time; discoveryIds[q.id]=true end
+    if q.kind=="prepare" and string.find(q.args," gear$") then
+        if gearIds[q.name] then assert(gearIds[q.name]==q.id,"lost gear reply got NEW ID") else gearIds[q.name]=q.id end
+    end
+end
+assert(scenario.didLimit and R.supported,"structured support/rate-limit handling missing")
+assert(not behaviors.Healbot.co.offdps and not behaviors.Healbot.co["offdps raid"],"v1 healer DPS enabled")
+for _,t in ipairs(trace) do assert(t.kind~="who","v1 used WHO discovery") end
+
+v1reset({clientOnlyArrival=true})
+ManTechPB_LFGBuildGroup(); run()
+assert(not next(mutations),"client range was incorrectly treated as server arrival")
+
+v1reset({fullRace=true})
+ManTechPB_LFGBuildGroup(); run()
+assert(not next(mutations) and string.find(ManTechPB_LFG.status.text,"group_full",1,true),"full-group race not reported")
+
+v1reset({loseAllPrep=true})
+ManTechPB_LFGBuildGroup(); run()
+local unknownName
+for _,record in pairs(R.db().journal) do if record.pending then unknownName=record.name end end
+assert(unknownName,"lost prep result was not journaled")
+ManTechPB_LFGBuildGroup(); run()
+assert(mutations[unknownName].gear==1,"resume repeated uncertain gear operation")
+assert(string.find(ManTechPB_LFG.status.text,"unknown",1,true),"uncertain prep not surfaced: "..ManTechPB_LFG.status.text)
+
+v1reset({noV1Reply=true})
+ManTechPB_LFGBuildGroup(); run()
+assert(not R.supported and table.getn(invites)==0,"timeout invented support or invited players")
+for _,t in ipairs(trace) do assert(t.kind~="who","silent automatic legacy fallback") end
+
+-- Correlation rejects a wrong GUID, unknown ID, and stale run before touching state.
+v1reset()
+ManTechPB_LFGBuildGroup()
+while ManTechPB_LFG.searching do step() end
+local op=R.active
+assert(op and op.kind=="status")
+R.sendOperation(op)
+emit("CHAT_MSG_SYSTEM",response(op.id,"999999","eligible","ok"))
+assert(not ManTechPB_LFG.verified,"wrong GUID accepted")
+emit("CHAT_MSG_SYSTEM",response("unrelated",op.guid,"eligible","ok"))
+assert(not ManTechPB_LFG.verified,"wrong ID accepted")
+ManTechPB_LFGStop("test cancellation")
+emit("CHAT_MSG_SYSTEM",response(op.id,op.guid,"eligible","ok"))
+assert(not ManTechPB_LFG.building,"late reply restarted cancelled builder")
+
+-- Legacy identity outcomes are neither bot success nor silent-human detection.
+v1reset(); R.db().mode="legacy"
+ManTechPB_LFGBuildGroup()
+while ManTechPB_LFG.searching do step() end
+local slot=ManTechPB_LFG.slots[ManTechPB_LFG.slotIndex]
+ManTechPB_LFG.armed.who=true
+emit("CHAT_MSG_WHISPER","Recruitment pending: transfer",slot.candidate.name)
+assert(R.legacyPending and not ManTechPB_LFG.verified,"pending transfer treated as eligible")
+emit("CHAT_MSG_WHISPER","Recruitment unavailable: external_group",slot.candidate.name)
+assert(ManTechPB_LFG.unavailable,"legacy refusal not handled")
+ManTechPB_LFGStop("end tests")
+
+-- Cursor paging and reordered discovery batches in a mixed 40-member raid.
+local priorCandidates=candidates
+candidates={MAGE={},ROGUE={}}
+for i=1,20 do
+    table.insert(candidates.MAGE,{name="Vmage"..string.char(64+i),class="MAGE",level=43})
+    table.insert(candidates.ROGUE,{name="Vrogue"..string.char(64+i),class="ROGUE",level=43})
+end
+v1reset({reordered=true})
+ManTechPB_LFGSetSize(40); party={"Humanone","Humantwo"}; raidActive=true
+ManTechPB_LFGSyncMembers()
+ManTechPB_LFGRoleChanged("tank",{slotIndex=1}); ManTechPB_LFGRoleChanged("heal",{slotIndex=2})
+for i=3,40 do if i~=5 then ManTechPB_LFG.slots[i].preference=i<=22 and "MAGE" or "ROGUE" end end
+ManTechPB_LFGBuildGroup(); run()
+assert(table.getn(party)==39 and table.getn(invites)==37,"v1 mixed raid did not fill 37 vacancies: "..ManTechPB_LFG.status.text)
+for i=1,40 do if i~=1 and i~=2 and i~=5 then assert(ManTechPB_LFG.slots[i].state=="READY","v1 raid not ready") end end
+assert(not mutations.Humanone and not mutations.Humantwo,"protected humans prepared")
+local pages=0
+for _,q in ipairs(requests) do if q.kind=="discover" then pages=pages+1 end end
+assert(pages==40,"cursor discovery missed pages or repeated scans")
+candidates=priorCandidates
+
+-- Cancellation keeps a pending preparation journal and allows a started teleport to finish.
+v1reset({noArrival=true,cancelTransfer=true})
+ManTechPB_LFGBuildGroup()
+while ManTechPB_LFG.building and ManTechPB_LFG.stage~="arrival" do step() end
+while not R.active or R.active.kind~="summon" or not R.active.sentAt do step() end
+local summonOp=R.active
+ManTechPB_LFGReset()
+nearby[summonOp.name]=true
+emit("CHAT_MSG_SYSTEM",response(summonOp.id,summonOp.guid,"arrived","ok"))
+for i=1,100 do step() end
+assert(not ManTechPB_LFG.building and not next(mutations),"late teleport restarted prep")
+assert(string.find(ManTechPB_LFG.status.text,"may still complete",1,true),"cancellation limitation hidden")
+
+-- Current client GUID formats resolve existing member IDs where available.
+v1reset(); party={"Tankbot"}; nearby.Tankbot=true
+ManTechPB_LFGSyncMembers(); ManTechPB_LFGRoleChanged("tank",{slotIndex=1})
+ManTechPB_LFGSourceChanged("PREP",{slotIndex=1})
+ManTechPB_LFG.slots[1].candidate={name="Tankbot",class="WARRIOR",level=43}
+function UnitGUID() return "0x0000000000000101" end
+assert(R.guid(ManTechPB_LFG.slots[1])=="257","legacy client GUID not parsed")
+UnitGUID=nil
+print("Core v1 tests passed: staged party, authoritative arrival, ID replay, rate limit, uncertainty journal, correlation, full-group race, and legacy identity outcomes.")

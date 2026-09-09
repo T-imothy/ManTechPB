@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.8.0"
+local MTPB_VERSION = "0.9.0"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -617,7 +617,7 @@ local MTPB_HELP_PAGES = {
     },
     GROUP = {
         title="Group Builder",
-        text="Choose Party (5) or a paged raid plan. Set roles and bot classes. Existing members default to Keep member: confirm their role dropdown without changing their character. Choose Prepare bot only for existing bots you want included.\n\nBuild / Resume fills vacancies, summons included bots, confirms ALL arrivals, then sets talents/roles, gear and supplies. Raid sizes authorize conversion. Kept humans are never modified or summoned.\n\nInvite failures try alternatives. New members pause the run for review. Summon acceptance is not arrival: dead, combat, loading or distant bots must become ready before prep.\n\nCore permissions still apply. Missing pre-invite replies need the core identification fix; unverified humans are not invited. See README.txt for limits.\n\nCancel keeps joined bots and confirmed prep checkpoints. Resume skips those steps in this UI session. Changing a role or reselecting Prepare bot resets that slot. Closing does not cancel."
+        text="Choose Party or a paged raid plan. Set roles/classes. Existing members default to Keep member; confirm their role. Prepare bot explicitly includes an existing bot. Humans are never summoned or changed.\n\nBuild / Resume fills vacancies, summons included bots, confirms ALL arrivals, then sets talents/settings and supplies. Raid sizes authorize conversion.\n\nCore v1 (default) uses bot-only discovery, reservations and server arrival confirmation. Legacy is for older cores. Existing bots without a client GUID use legacy commands. Refusals are shown; server rules still apply.\n\nCancel keeps members/completed work; an already-started teleport may finish. Unknown gear results stop safely. Inspect the bot, then /mtprecruit reconcile NAME deliberately permits new prep. See README for saved-checkpoint/restart limits. Closing does not cancel."
     }
 }
 
@@ -2538,6 +2538,7 @@ function ManTechPB_LFGNextSlot()
         s.nextSummon=GetTime()
     else
         if not ManTechPB_LFGArrival(name) then ManTechPB_LFGStop(name.." is not ready nearby; preparation has not started."); return end
+        if (slot.candidate.level or 0)<10 then ManTechPB_LFGStop(name..": below talent level; cannot confirm specialization. No gear or supplies were requested."); return end
         if slot.readySignature==ManTechPB_LFGReadySignature(slot) then
             slot.state="READY"; s.slotIndex=s.slotIndex+1; ManTechPB_LFGNextSlot(); return
         end
@@ -2574,6 +2575,10 @@ function ManTechPB_LFGMembershipValid()
     return true
 end
 
+function ManTechPB_LFGInvite(name)
+    InviteByName(name)
+end
+
 function ManTechPB_LFGTick(token)
     local s=ManTechPB_LFG
     if not s.building or s.runToken~=token then return end
@@ -2597,7 +2602,7 @@ function ManTechPB_LFGTick(token)
                 if s.size>5 and (GetNumRaidMembers and GetNumRaidMembers() or 0)==0 and table.getn(ManTechPB_LFGRoster())>1 then
                     if not ConvertToRaid then ManTechPB_LFGStop("Raid conversion API unavailable."); return end
                     s.afterConvert="invite"; ManTechPB_LFGSetStage("convert","CREATE RAID",15); ConvertToRaid()
-                else ManTechPB_LFGSetStage("invite","JOINING",20); InviteByName(name) end
+                else ManTechPB_LFGSetStage("invite","JOINING",20); ManTechPB_LFGInvite(name) end
             end
         elseif GetTime()>=s.deadline then
             s.verifyTimeouts=(s.verifyTimeouts or 0)+1
@@ -2616,7 +2621,7 @@ function ManTechPB_LFGTick(token)
         elseif GetTime()>=s.deadline then ManTechPB_LFGRejectCandidate() end
     elseif s.stage=="convert" then
         if (GetNumRaidMembers and GetNumRaidMembers() or 0)>0 then
-            if s.afterConvert=="invite" then ManTechPB_LFGSetStage("invite","JOINING",20); InviteByName(name)
+            if s.afterConvert=="invite" then ManTechPB_LFGSetStage("invite","JOINING",20); ManTechPB_LFGInvite(name)
             else s.slotIndex=s.slotIndex+1; ManTechPB_LFGNextSlot() end
         end
     elseif s.stage=="arrival" then

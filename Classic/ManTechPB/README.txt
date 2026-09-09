@@ -1,4 +1,4 @@
-ManTechPB 0.8.0
+ManTechPB 0.9.0
 
 ManTechPB is a standalone CMaNGOS PlayerBots manager. It does not require the
 Mangosbot addon and does not overwrite it.
@@ -61,31 +61,52 @@ Tank gets Tank Assist, Pull and Pull Back. Healer gets a healing preset and Heal
 DPS OFF. Supported AoE, cooldowns, buffs, cleansing, food/drink and potions are
 enabled, using class-specific strategies where needed.
 
-Summon uses the server's existing command and rules. Arrival requires the bot to
-be online, alive, noncombat, visible and within follow-interaction distance.
-Two summon requests over 45 seconds are allowed; unresolved combat/death/loading
-or denied destinations STOP preparation. Sending a summon is not arrival.
+Protocol: Core v1 is the default. It integrates the released PlayerBots contract
+c87bc38ef3da57282b3643da8e2cbdddb28c0a45. Discovery is bot-only and cursor-paged;
+eligibility is checked again and a reservation is requested before invitation.
+Only actual roster membership confirms joining. Known-GUID bots require the
+server's arrived response AND client readiness before prep. The core requires
+completed transfer, same map/instance, alive/out of combat, 10 yards and LOS.
+Client CheckInteractDistance alone is not proof of those server conditions.
+
+Core summon operations have a bounded 60-second client response window, including
+queue allowance. Repeated transmissions reuse the SAME ID, never extend the
+server's 40-second summon deadline. Dead/combat/unsafe destinations remain subject
+to server rules. Cancellation cannot stop an already-started native teleport.
 
 Invite failures try another candidate, with one bounded replacement search.
 Unexpected joins/departures stop for roster/role review. Existing humans remain
 protected and take precedence over a stale recruitment plan.
 
-Cancel discards unsent steps without undoing completed changes. Build / Resume
-keeps confirmed gear/supply checkpoints for the same bot, role and build in this
-UI session. Changing a role or explicitly choosing Prepare bot again clears that
-slot's checkpoint. Reload/logout loses checkpoints; a lost server acknowledgement
-still needs a future idempotent core protocol. Closing the window does not cancel.
+Cancel discards unsent steps and releases this builder's pending GUID requests;
+members and completed work stay. Closing the window does not cancel. Structured
+prep saves acknowledged steps and unknown results. Missing acknowledgments retry
+the SAME ID/payload; explicit rate limits wait before a bounded NEW-ID retry.
+An unknown prep result after interruption blocks fresh gear generation. Inspect
+the bot, then /mtprecruit reconcile NAME only if you deliberately want to clear
+its checkpoints and permit new preparation. Role/build changes invalidate matched
+checkpoints; selecting Prepare alone does not erase the saved safety journal.
+Core receipts last 10 minutes and do not survive server restart. SavedVariables
+may be lost in a client crash. This is not durable exactly-once protection.
 
-IMPORTANT: Legacy /who cannot prove bot identity. This release still needs the
-core task to resolve the pre-invite bot "who" reply-permission problem or provide
-a defined replacement protocol. It never invites arbitrary unverified humans as
-a workaround. Summon and prep permissions cannot be bypassed by an addon.
+Select Protocol: Legacy explicitly for older cores. No reply is NOT proof that
+v1 is unsupported, and there is no silent automatic mutation fallback. Legacy
+handles Recruitment unavailable/pending whispers and readable system refusals.
+It retains its existing WHO and summon behavior (two summons/45 seconds) and
+in-session checkpoints. Existing selected bots without a client GUID also use
+legacy commands; no false claim of authoritative server arrival is made for them.
+V1 public discovery does not enumerate every authorized account/guild alt.
 
-Preview /who is optional. Empty rows search their class/role. Queries deduplicate
-classes across slots, wait at least eight seconds apart, retry a timeout once,
-and have bounded replacement/probe budgets. Avoid simultaneous manual /who or
-other Who-search addons: legacy responses have no request IDs or bot identity.
-Core-wide scaling and authoritative reservations remain separate core work.
+Preview search is optional. Both modes deduplicate classes. V1 discovery waits
+at least 2.1 seconds between requests, follows cursors with a 128-page cap, and
+handles server rate limits. Legacy WHO waits eight seconds; avoid simultaneous
+manual WHO or other Who-search addons. Both paths have bounded attempts.
+Exact server builds must be available; below-talent-level bots cannot be marked
+specialized. Adequate supplies/inapplicable ammo are successful core no-ops.
+
+Update all files, including Recruitment.lua and ManTechPB.toc, then restart the
+client (or reload after a file update). Open /mtp lfg and use Core v1 on the updated
+realm. The test suite is mocked; actual realm gameplay still needs verification.
 
 Select one bot and open Setup > Talents. ManTechPB asks that bot for the exact
 predefined builds configured on the current server; it never invents a cross-version

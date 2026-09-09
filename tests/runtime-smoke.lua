@@ -110,6 +110,8 @@ local function tick(seconds, count)
 end
 
 dofile(arg[1] or "work/mantechpb/ManTechPB.lua")
+dofile((string.gsub(arg[1] or "work/mantechpb/ManTechPB.lua","ManTechPB.lua$","Recruitment.lua")))
+ManTechPB_Recruit.db().mode="legacy"
 
 local presetExpectations = {
     DRUID={{"pve balance","balance","ranged"},{"pve feral","dps feral","melee"},{"pve resto","restoration","heal"}},

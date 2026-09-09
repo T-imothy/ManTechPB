@@ -1,6 +1,6 @@
 # ManTechPB
 
-ManTechPB is a standalone in-game manager for CMaNGOS PlayerBots. It provides a compact interface for party and individual bot control, role and talent setup, combat behavior, formations, loot policy, advanced class controls, a staged `/who` Group Builder, and a movable bot bar.
+ManTechPB is a standalone in-game manager for CMaNGOS PlayerBots. It provides party and individual bot control, role and talent setup, combat behavior, formations, loot policy, advanced class controls, a staged Group/Raid Builder, and a movable bot bar.
 
 This project is a modern standalone successor inspired by the original [Mangosbot UI addon by ike3](https://github.com/ike3/mangosbot-addon). Full credit and thanks go to ike3 and the original addon contributors for pioneering the in-game PlayerBots control interface. ManTechPB is built for the actively maintained [CMaNGOS PlayerBots project](https://github.com/cmangos/playerbots).
 
@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.8.0 |
-| The Burning Crusade | 20400 | 0.8.0-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.8.0-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.9.0 |
+| The Burning Crusade | 20400 | 0.9.0-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.9.0-WotLK.1 |
 
 ## Installation
 
@@ -28,7 +28,7 @@ Existing members default to **Keep member**, regardless of whether they might be
 
 **Build / Resume** runs these phases:
 
-1. Search matching classes/levels and verify bot replies; fill vacant slots with confirmed joins.
+1. Search matching classes/levels, recheck bot eligibility and reserve before invitation; fill vacancies with confirmed joins.
 2. Summon all included bots that are not already nearby and ready.
 3. Confirm arrival for every included bot before starting any preparation.
 4. Confirm server talent presets and role settings, then random gear and supplies.
@@ -39,27 +39,31 @@ Tanks receive Tank Assist, Pull and Pull Back. Healers receive a healing preset 
 
 ### Summons, interruptions and resume
 
-The existing bot `summon` command is used; normal server policy still applies. Arrival requires an online, alive, noncombat unit that is visible and within the client's follow-interaction distance. Visibility and interaction range prevent treating a same-map/different-instance bot as nearby. A sent command or accepted teleport alone is not success.
+Core v1 uses the released `.bot recruit v1` contract from PlayerBots revision `c87bc38ef3da57282b3643da8e2cbdddb28c0a45`. Bots with a known GUID require a correlated server `arrived` response plus client readiness before prep. The core checks completed transfer, same map AND instance, alive/out of combat, within 10 yards and line of sight. Client follow-interaction distance alone does not prove that stricter condition.
 
-Each bot gets at most two summon requests over a 45-second arrival window. Dead/ghost, combat, loading, inaccessible destinations or denied summons stop prep if readiness never becomes true. No addon-side resurrection or forced teleport is attempted. Human/Keep members are never summoned or prepared.
+One logical v1 summon uses one ID and a bounded 60-second response window to accommodate the core's 40-second deadline plus queue delay. Unknown replies retry the same ID/payload, never reset the server deadline. A pre-existing summon is checked with fresh status IDs. Legacy mode retains up to two raw requests and a 45-second window. Dead/ghost, combat, loading or denied destinations stop prep if readiness never becomes true. No forced teleport/resurrection is attempted.
 
 Failed invitations try alternative candidates. Candidate exhaustion permits one additional paced search, not an endless loop. New/unexpected members, departures or leadership changes stop the run for review; humans are not overwritten to satisfy an old plan. Existing groups must fit the selected size and every existing member must be accounted for.
 
-**Cancel** drops unsent steps without undoing completed changes or removing members. **Build / Resume** retains in-session confirmed gear/supply checkpoints for the same bot, role and build. Completed steps are not repeated. Changing a role or explicitly choosing Prepare bot again deliberately clears that slot's checkpoint. Checkpoints do not survive UI reload/logout, and a lost server acknowledgement cannot prove whether a command executed; the future core protocol needs idempotent requests for that case. Closing the window does not cancel.
+**Cancel** drops unsent steps and sends bounded cancellation/release commands for GUIDs touched by this builder. It never removes members or undoes completed preparation. A started native teleport may still complete. Closing the window does not cancel.
 
-### Discovery limitations / pending core integration
+Structured preparation records acknowledged steps and unknown results in SavedVariables, scoped to realm/player/bot and role/build. Resume skips acknowledged work. Unknown/lost replies retry the SAME ID and payload (up to three transmissions); explicit rate-limit refusals use delayed NEW IDs (up to three retries). Successful no-op supply/ammo replies count as completion. Below-talent-level bots or missing builds do not count as specialized.
 
-This version still uses legacy `/who` and bot `who` replies. The normal `/who` list does **not** prove bot identity. No new core endpoint is assumed or invented.
+After reload or an unresolved mutation, the addon does not blindly regenerate gear. Inspect the bot and use `/mtprecruit reconcile NAME` only when you deliberately want to clear its prep checkpoints and permit new gear/supplies. Core receipts last ten minutes and are not persistent across server restarts; SavedVariables are also not guaranteed to survive a client crash. This is not durable exactly-once protection. Legacy operations retain in-session checkpoints only. A role/build change invalidates matching structured checkpoints; reselecting Prepare alone does not erase the saved safety journal.
 
-**The known pre-invite reply-permission problem still requires the core task's fix or a defined replacement protocol.** On affected cores the builder cannot safely auto-invite unverified candidates and will stop with an explanation. It does not bypass this by inviting arbitrary human results. Bots reporting another master are skipped; normal invitations cannot pull candidates out of another group. Server restrictions on summons, respecs, gear and supplies also remain authoritative.
+### Core v1 and Legacy modes
 
-Queries are deduplicated by class, not repeated per raid slot. At level 43 +/-2 a Warrior query is `/who c-"Warrior" 41-45`. They run at least eight seconds apart with one timeout retry. Preview /who is optional; empty rows search their role and named candidates cycle alternatives. Avoid competing Who-search addons/manual queries during a run because legacy replies have no request ID. Results may also be server-capped.
+The bottom-right **Protocol** button selects Core v1 (default) or Legacy while idle. Selection is not a claim that the server supports v1: only a correlated response confirms support. A timeout never automatically downgrades to mutating legacy commands. Select Legacy explicitly on an older server. Preview search is optional.
 
-Recruitment is sequential, with a bounded probe budget (at most 120 for large plans), at most three consecutive unanswered identification probes, one replacement search round, and one active invite/summon/prep step at a time. Roster reads are cached within a tick. This limits this client; server-wide throttling, reliable bot-only discovery, reservation conflicts and authoritative arrival/identity remain core responsibilities.
+V1 discovery returns public eligible random-holder bots, not every authorized account/guild alt. Direct Prepare selection remains useful for existing alts. Existing member GUIDs are resolved through the client where available or retained from this session's discovery. On clients without those GUIDs, that explicitly selected bot uses the legacy identification/invite/summon/prep path; it does not gain an invented authoritative arrival proof. Humans are never considered bots merely because WHO returned their name.
+
+V1 queries deduplicate classes, follow cursor pages (at most 128 pages per search), and wait at least 2.1 seconds between discovery requests. Only a matching completion commits a candidate batch; retries deduplicate candidates. Requests use stable GUIDs and unique IDs; one logical operation runs at a time. Reservations are requested immediately before inviting. Full-group/leadership races stop for review. Rate limits produce bounded waits, not request storms.
+
+Legacy queries use `/who c-"Warrior" 41-45` for a level-43 Warrior search at +/-2, at least eight seconds apart. Avoid simultaneous manual/other-addon Who searches. Bot whispers must establish identity; `Recruitment unavailable: <reason>` and `Recruitment pending: transfer` are handled explicitly. Native invitations expire on the released core after 15 seconds; the client allows a short roster-update margin. No mode bypasses server permissions, ownership, group capacity or instance policies.
 
 ### Verification
 
-`tests/group-builder.lua` is a deterministic mocked-client integration test, not live server or visual verification. Run with Lua 5.0 and the addon Lua path as the first argument. It covers full-group-before-summon and arrival-before-prep ordering, dead/refused summons, missing replies, replacement invites, cancellation, partial resume without repeated confirmed gear, protected human members, paged editing, solo-to-raid conversion, and a 40-slot mock raid with three kept humans plus 37 bots and two class queries. Live server permissions, response formats and actual server-wide load still require validation.
+`tests/group-builder.lua` and `tests/runtime-smoke.lua` load both addon chunks in a mocked client; run with Lua 5.0 and the main addon Lua path as the first argument. They cover legacy party/raid behavior plus v1 staged parties, a mixed 40-slot raid with 37 bots, cursor paging, reversed batches, lost gear replies, repeated IDs, rate limits, wrong GUID/ID and stale replies, full-group races, cancellation with late teleport completion, unknown-prep checkpoints, and client GUID parsing. These are not live realm, visual, inventory-content or server-wide load tests.
 
 ## Compatibility
 
