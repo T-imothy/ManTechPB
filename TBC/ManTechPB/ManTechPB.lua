@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.6.19"
+local MTPB_VERSION = "0.6.20"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -129,11 +129,22 @@ local function MTPB_PartySize()
     return GetNumPartyMembers and GetNumPartyMembers() or 0
 end
 
+function ManTechPB_GroupChatChannel()
+    local raid = GetNumRaidMembers and GetNumRaidMembers() or 0
+    return raid > 0 and "RAID" or "PARTY"
+end
+
 local function MTPB_CharacterKey()
     local player = UnitName and UnitName("player") or nil
     local realm = GetRealmName and GetRealmName() or ""
     if not player or player == "" then return nil end
     return (realm or "") .. ":" .. player
+end
+
+local function MTPB_BarePlayerName(name)
+    if not name then return nil end
+    local dash = string.find(name, "-", 1, true)
+    return dash and string.sub(name, 1, dash - 1) or name
 end
 
 local function MTPB_IsCurrentPartyMember(name)
@@ -146,15 +157,9 @@ local function MTPB_IsCurrentPartyMember(name)
     end
     local i
     for i = 1, count do
-        if UnitName(prefix .. i) == name then return true end
+        if MTPB_BarePlayerName(UnitName(prefix .. i)) == MTPB_BarePlayerName(name) then return true end
     end
     return false
-end
-
-local function MTPB_BarePlayerName(name)
-    if not name then return nil end
-    local dash = string.find(name, "-", 1, true)
-    return dash and string.sub(name, 1, dash - 1) or name
 end
 
 local function MTPB_IsKnownBot(name)
@@ -234,7 +239,7 @@ local function MTPB_ShouldHideBotChat(eventName, message, sender)
     local manualScope = MTPB_MANUAL_TALENT_QUERY_SCOPE
     if manualScope and GetTime() <= MTPB_MANUAL_TALENT_QUERY_UNTIL and MTPB_IsTalentReply(message) then
         local bareSender = MTPB_BarePlayerName(sender)
-        if manualScope == "PARTY" or bareSender == manualScope then return false end
+        if manualScope == "GROUP" or bareSender == manualScope then return false end
     end
     if eventName == "CHAT_MSG_WHISPER_INFORM" then
         local addonOutbound = MTPB_IsRememberedOutbound(message, "WHISPER", sender)
@@ -244,11 +249,12 @@ local function MTPB_ShouldHideBotChat(eventName, message, sender)
         end
         return addonOutbound
     end
-    if eventName == "CHAT_MSG_PARTY" or eventName == "CHAT_MSG_PARTY_LEADER" then
+    if eventName == "CHAT_MSG_PARTY" or eventName == "CHAT_MSG_PARTY_LEADER" or eventName == "CHAT_MSG_RAID" or eventName == "CHAT_MSG_RAID_LEADER" then
         if MTPB_BarePlayerName(sender) == MTPB_BarePlayerName(UnitName("player")) then
-            local addonOutbound = MTPB_IsRememberedOutbound(message, "PARTY", nil)
+            local outboundChannel = (eventName == "CHAT_MSG_RAID" or eventName == "CHAT_MSG_RAID_LEADER") and "RAID" or "PARTY"
+            local addonOutbound = MTPB_IsRememberedOutbound(message, outboundChannel, nil)
             if not addonOutbound and MTPB_IsTalentCommand(message) then
-                MTPB_MANUAL_TALENT_QUERY_SCOPE = "PARTY"
+                MTPB_MANUAL_TALENT_QUERY_SCOPE = "GROUP"
                 MTPB_MANUAL_TALENT_QUERY_UNTIL = GetTime() + 20
             end
             return addonOutbound
@@ -288,6 +294,8 @@ local function MTPB_InstallChatFilter()
         pcall(ChatFrame_AddMessageEventFilter, "CHAT_MSG_WHISPER_INFORM", MTPB_MessageEventFilter)
         pcall(ChatFrame_AddMessageEventFilter, "CHAT_MSG_PARTY", MTPB_MessageEventFilter)
         pcall(ChatFrame_AddMessageEventFilter, "CHAT_MSG_PARTY_LEADER", MTPB_MessageEventFilter)
+        pcall(ChatFrame_AddMessageEventFilter, "CHAT_MSG_RAID", MTPB_MessageEventFilter)
+        pcall(ChatFrame_AddMessageEventFilter, "CHAT_MSG_RAID_LEADER", MTPB_MessageEventFilter)
         MTPB_CHAT_FILTER_INSTALLED = true
     elseif type(ChatFrame_OnEvent) == "function" then
         MTPB_ORIGINAL_CHATFRAME_ONEVENT = ChatFrame_OnEvent
@@ -318,7 +326,7 @@ end
 local function MTPB_QueueCommand(text, chat, lang, channel, raw)
     if type(text) ~= "string" or text == "" then return false end
     if chat == "WHISPER" and (not channel or channel == "") then return false end
-    if chat == "PARTY" and MTPB_PartySize() == 0 then return false end
+    if (chat == "PARTY" or chat == "RAID") and MTPB_PartySize() == 0 then return false end
     local start = 1
     repeat
         local separator = not raw and string.find(text, MTPB_COMMAND_SEPARATOR, start, true)
@@ -359,7 +367,7 @@ end
 local function MTPB_QueryBotParty()
     -- Only query state that the manager actually displays.  In particular,
     -- "ll ?" makes every bot dump four unrelated loot lists into chat.
-    MTPB_SendBotCommand("#a co ?" .. MTPB_COMMAND_SEPARATOR .. "#a nc ?" .. MTPB_COMMAND_SEPARATOR .. "#a react ?" .. MTPB_COMMAND_SEPARATOR .. "formation ?", "PARTY")
+    MTPB_SendBotCommand("#a co ?" .. MTPB_COMMAND_SEPARATOR .. "#a nc ?" .. MTPB_COMMAND_SEPARATOR .. "#a react ?" .. MTPB_COMMAND_SEPARATOR .. "formation ?", ManTechPB_GroupChatChannel())
 end
 
 local function MTPB_QuerySelectedBot(name)
@@ -389,6 +397,7 @@ end
 
 local function MTPB_ParseStrategies(message, sender)
     if not sender or not message then return false end
+    sender = MTPB_BarePlayerName(sender)
     if string.sub(message, 1, 4) == "BOT\t" then message = string.sub(message, 5) end
     local context, trimAt
     if string.find(message, "Combat Strategies: ", 1, true) == 1 then context, trimAt = "co", 20
@@ -585,7 +594,7 @@ local MTPB_HELP_PAGES = {
     },
     TALENTS = {
         title="Talents and roles",
-        text="Find Builds asks the selected bot for the exact builds configured on this server. Always use that list; build names differ between Classic, TBC, and WotLK. Click a returned build to apply it. ManTechPB waits for the server to confirm the real build before matching the AI role.\n\nCurrent asks only the selected bot for its talent spec. That one request and reply remain visible in chat even when Bot Chat is hidden, while the bottom line shows only the short spec name. Auto Pick lets PlayerBots choose. Reset Talents requires a second confirmation click.\n\nTalents spend points. Role cards control behavior. A correct healer build can still DPS when Healer DPS is enabled, and a tank build still needs the intended tank strategies."
+        text="Find Builds asks the selected bot for the exact builds configured on this server. Always use that list; build names differ between Classic, TBC, and WotLK. Click a returned build to apply it. ManTechPB waits for the server to confirm the real build before matching the AI role. Raid and battleground-raid replies are captured from whisper, party, or raid chat.\n\nCurrent asks only the selected bot for its talent spec. That one request and reply remain visible in chat even when Bot Chat is hidden, while the bottom line shows only the short spec name. Auto Pick lets PlayerBots choose. Reset Talents requires a second confirmation click.\n\nTalents spend points. Role cards control behavior. A correct healer build can still DPS when Healer DPS is enabled, and a tank build still needs the intended tank strategies."
     },
     BEHAVIOR = {
         title="Combat and world behavior",
@@ -903,20 +912,20 @@ local function MTPB_GetSelectedClass()
     if data and data.class then return MTPB_NormalizeClass(data.class) end
     local i, name
     for i = 1, 40 do
-        name = UnitName("raid" .. i)
+        name = MTPB_BarePlayerName(UnitName("raid" .. i))
         if name == MTPB_SELECTED then
             local _, class = UnitClass("raid" .. i)
             return MTPB_NormalizeClass(class)
         end
         if i <= 4 then
-            name = UnitName("party" .. i)
+            name = MTPB_BarePlayerName(UnitName("party" .. i))
             if name == MTPB_SELECTED then
                 local _, class = UnitClass("party" .. i)
                 return MTPB_NormalizeClass(class)
             end
         end
     end
-    if UnitName("target") == MTPB_SELECTED then
+    if MTPB_BarePlayerName(UnitName("target")) == MTPB_SELECTED then
         local _, class = UnitClass("target")
         return MTPB_NormalizeClass(class)
     end
@@ -934,8 +943,8 @@ local function MTPB_PartyBotNames()
     end
     local i, name
     for i = 1, count do
-        name = UnitName(prefix .. i)
-        if name and name ~= UnitName("player") and MTPB_BOTS and MTPB_BOTS[name] and not seen[name] then
+        name = MTPB_BarePlayerName(UnitName(prefix .. i))
+        if name and name ~= MTPB_BarePlayerName(UnitName("player")) and MTPB_BOTS and MTPB_BOTS[name] and not seen[name] then
             table.insert(names, name)
             seen[name] = true
         end
@@ -985,7 +994,7 @@ local function MTPB_SendCommands(commands, label, suppressAutomaticRefresh)
             MTPB_SetStatus("Join a party with PlayerBots first.", MTPB_COLORS.red)
             return false
         end
-        sent = MTPB_SendBotCommand(combined, "PARTY")
+        sent = MTPB_SendBotCommand(combined, ManTechPB_GroupChatChannel())
     end
     if sent ~= false then
         MTPB_SetStatus("Sent " .. label .. " to " .. (MTPB_SELECTED or "party") .. ".", MTPB_COLORS.green)
@@ -1013,8 +1022,8 @@ local function MTPB_SendDirect(text, label, requiresTarget)
             MTPB_SetStatus("Join a party with PlayerBots first.", MTPB_COLORS.red)
             return
         end
-        SendChatMessage(text, "PARTY")
-        MTPB_SetStatus("Sent " .. label .. " to party.", MTPB_COLORS.green)
+        SendChatMessage(text, ManTechPB_GroupChatChannel())
+        MTPB_SetStatus("Sent " .. label .. " to group.", MTPB_COLORS.green)
     end
 end
 
@@ -1475,6 +1484,7 @@ local function MTPB_ApplyTalentBuild(build)
 end
 
 local function MTPB_ParseTalentReply(message, sender)
+    sender = MTPB_BarePlayerName(sender)
     if not message or not sender or not MTPB_BOTS[sender] then return false end
     local clean = message
     if string.sub(clean, 1, 4) == "BOT\t" then clean = string.sub(clean, 5) end
@@ -2304,6 +2314,7 @@ end
 
 local function MTPB_UpdateRoster()
     if not MTPB_FRAME then return end
+    local inRaid = (GetNumRaidMembers and GetNumRaidMembers() or 0) > 0
     local names = MTPB_ROSTER_VIEW == "ALTS" and MTPB_AltBotNames() or MTPB_PartyBotNames()
     local i, button, name, data, class, color
     for i = 1, 10 do
@@ -2323,8 +2334,10 @@ local function MTPB_UpdateRoster()
             button:Hide()
         end
     end
-    local label = MTPB_ROSTER_VIEW == "ALTS" and "account alt" or "party bot"
+    local label = MTPB_ROSTER_VIEW == "ALTS" and "account alt" or (inRaid and "raid bot" or "party bot")
     MTPB_ROSTER_TEXT:SetText(table.getn(names) .. " " .. label .. (table.getn(names) == 1 and "" or "s"))
+    if MTPB_ROSTER_FILTER_BUTTONS.PARTY then MTPB_ROSTER_FILTER_BUTTONS.PARTY:SetText(inRaid and "Raid" or "Party") end
+    if not MTPB_SELECTED and MTPB_SCOPE_TEXT then MTPB_SCOPE_TEXT:SetText(MTPB_COLORS.green .. (inRaid and "Entire Raid" or "Entire Party") .. "|r") end
     for name, button in pairs(MTPB_ROSTER_FILTER_BUTTONS) do
         if name == MTPB_ROSTER_VIEW then button:LockHighlight() else button:UnlockHighlight() end
     end
@@ -2678,7 +2691,7 @@ end
 
 local function MTPB_GetFriendlyTargetName()
     if not UnitExists("target") or UnitIsEnemy("target", "player") or not UnitIsPlayer("target") then return nil end
-    local name = UnitName("target")
+    local name = MTPB_BarePlayerName(UnitName("target"))
     if not name or name == UnitName("player") then return nil end
     return name
 end
@@ -2689,7 +2702,7 @@ function ManTechPB_OpenForTarget(requestedName)
     if GetTime() - MTPB_LAST_ALT_OPEN < 0.20 and name == MTPB_SELECTED and MTPB_FOCUS_FRAME and MTPB_FOCUS_FRAME:IsVisible() then return true end
     MTPB_LAST_ALT_OPEN = GetTime()
     if not MTPB_BOTS[name] then MTPB_BOTS[name] = {online=true} end
-    if UnitName("target") == name then
+    if MTPB_BarePlayerName(UnitName("target")) == name then
         local _, class = UnitClass("target")
         if class then MTPB_BOTS[name].class = class end
     end
@@ -2757,8 +2770,9 @@ local function MTPB_SendBotBarAction(action)
         MTPB_Chat("Select an attackable target first.")
         return
     end
-    if action.prepare then MTPB_SendRawCommand(action.prepare, "PARTY") end
-    MTPB_SendRawCommand(action.command, "PARTY")
+    local channel = ManTechPB_GroupChatChannel()
+    if action.prepare then MTPB_SendRawCommand(action.prepare, channel) end
+    MTPB_SendRawCommand(action.command, channel)
 end
 
 local function MTPB_CreateBotBar()
@@ -2932,10 +2946,13 @@ end
 local MTPB_EVENTS = CreateFrame("Frame")
 MTPB_EVENTS:RegisterEvent("VARIABLES_LOADED")
 MTPB_EVENTS:RegisterEvent("PARTY_MEMBERS_CHANGED")
+pcall(MTPB_EVENTS.RegisterEvent, MTPB_EVENTS, "RAID_ROSTER_UPDATE")
 MTPB_EVENTS:RegisterEvent("PLAYER_TARGET_CHANGED")
 MTPB_EVENTS:RegisterEvent("CHAT_MSG_WHISPER")
 MTPB_EVENTS:RegisterEvent("CHAT_MSG_PARTY")
 pcall(MTPB_EVENTS.RegisterEvent, MTPB_EVENTS, "CHAT_MSG_PARTY_LEADER")
+pcall(MTPB_EVENTS.RegisterEvent, MTPB_EVENTS, "CHAT_MSG_RAID")
+pcall(MTPB_EVENTS.RegisterEvent, MTPB_EVENTS, "CHAT_MSG_RAID_LEADER")
 MTPB_EVENTS:RegisterEvent("CHAT_MSG_ADDON")
 MTPB_EVENTS:RegisterEvent("CHAT_MSG_SYSTEM")
 MTPB_EVENTS:SetScript("OnEvent", function(self, eventName, a1, a2, a3, a4)
@@ -2958,7 +2975,7 @@ MTPB_EVENTS:SetScript("OnEvent", function(self, eventName, a1, a2, a3, a4)
         MTPB_ParseTalentReply(p1, p2)
         MTPB_ParseStrategies(p1, p2)
         if MTPB_FRAME then MTPB_UpdateCards() end
-    elseif currentEvent == "CHAT_MSG_PARTY" or currentEvent == "CHAT_MSG_PARTY_LEADER" then
+    elseif currentEvent == "CHAT_MSG_PARTY" or currentEvent == "CHAT_MSG_PARTY_LEADER" or currentEvent == "CHAT_MSG_RAID" or currentEvent == "CHAT_MSG_RAID_LEADER" then
         -- Some Playerbot cores answer a privately whispered "talents list"
         -- in party chat. Capture that response without treating ordinary party
         -- conversation as a command result.
@@ -2967,7 +2984,7 @@ MTPB_EVENTS:SetScript("OnEvent", function(self, eventName, a1, a2, a3, a4)
     elseif currentEvent == "CHAT_MSG_ADDON" then
         if p1 == "BOT" then MTPB_ParseTalentReply(p2, p4); MTPB_ParseStrategies(p2, p4) end
         if MTPB_FRAME then MTPB_UpdateCards() end
-    elseif currentEvent == "PARTY_MEMBERS_CHANGED" then
+    elseif currentEvent == "PARTY_MEMBERS_CHANGED" or currentEvent == "RAID_ROSTER_UPDATE" then
         -- Roster changes can fire several times while logging in or reloading.
         -- Refresh the local UI only; query settings when the user opens the
         -- manager, selects a bot, or presses Refresh.
