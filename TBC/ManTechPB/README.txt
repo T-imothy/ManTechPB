@@ -1,4 +1,8 @@
-ManTechPB 0.10.1
+ManTechPB 0.10.2
+
+0.10.2: Spec now offers just Auto by role and role-appropriate exact builds.
+Removed redundant Auto family entries across Classic, TBC and Wrath.
+Exact-build validation and bot preparation behavior are unchanged.
 
 0.10.1: Spec now lists exact talent builds for every supported class/job in
 Classic, TBC and Wrath, with separate Auto choices. Classic Warrior tanks

@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.10.1"
+local MTPB_VERSION = "0.10.2"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -2316,15 +2316,6 @@ function ManTechPB_LFGSpecOptions(slot)
             seen[key]=true
         end
     end
-    for _,spec in ipairs(MTPB_SPECS[class] or {}) do
-        if (slot.role=="tank" and spec.role=="tank") or (slot.role=="heal" and spec.role=="heal") or
-            (slot.role=="dps" and (spec.role=="melee" or spec.role=="ranged")) then
-            table.insert(values,{value=spec.strategy,label="Auto: "..spec.name})
-        end
-    end
-    if class=="WARRIOR" and slot.role=="tank" and ManTechPB_LFGInterface()<20000 then
-        table.insert(values,{value="furyprot",label="Auto: Fury/Prot hybrid"})
-    end
     return values
 end
 
@@ -2443,7 +2434,7 @@ function ManTechPB_LFGSpecTooltip(button)
     if not slot then return end
     GameTooltip:SetOwner(button,"ANCHOR_RIGHT")
     GameTooltip:SetText(slot.buildChoice or "Choose an exact server build",1,0.82,0.35)
-    GameTooltip:AddLine("Exact names choose one build. Auto entries choose within a family.",1,1,1,true)
+    GameTooltip:AddLine("Choose an exact build, or let Auto by role choose a suitable build.",1,1,1,true)
     GameTooltip:AddLine("Choices use this client version's catalogue, or the bot's live list when available. The live list is checked again before applying.",0.6,0.85,1,true)
     GameTooltip:Show()
 end
@@ -3292,7 +3283,7 @@ function ManTechPB_ShowLFGInstructions(page)
     local s=ManTechPB_LFG
     local pages={
         {title="Play & go",text="1. Choose your bots' classes under Class / Style.\n   Pick an exact build under Spec, or leave an Auto choice.\n\n2. Click Build / Resume at the bottom.\n\n3. Wait until every included bot says READY and the\n   bottom message confirms preparation is complete.\n\n4. Go play!\n\nThe addon finds bots, invites them one at a time, summons them, then sets their talents, behavior, gear and supplies. You do not need to invite or prepare each bot yourself.\n\nPrepare bot is an inclusion setting, not another step to click after READY. Keep members are left unchanged."},
-        {title="Your slots",text="ROLE\nChoose Tank, Healer or DPS. Make sure your own slot has the role you will play.\n\nCLASS / STYLE AND SPEC\nChoose a class, then an exact build under Spec (for example furyprot (slam)). Auto entries choose by role/family instead. Use Next / Previous for more builds; hover a selected build to read its full name. The bot must offer the exact choice on its live list.\n\nKEEP MEMBER\nLeave this character untouched. This is always used for you and is the default for existing group members.\n\nPREPARE BOT\nInclude an existing bot in summoning, respec, gear and supplies. Select this only for bots you want changed. Empty slots recruit new bots automatically."},
+        {title="Your slots",text="ROLE\nChoose Tank, Healer or DPS. Make sure your own slot has the role you will play.\n\nCLASS / STYLE AND SPEC\nChoose a class, then an exact build under Spec (for example furyprot (slam)). Auto by role chooses a suitable build instead. Use Next / Previous for more builds; hover a selected build to read its full name. The bot must offer the exact choice on its live list.\n\nKEEP MEMBER\nLeave this character untouched. This is always used for you and is the default for existing group members.\n\nPREPARE BOT\nInclude an existing bot in summoning, respec, gear and supplies. Select this only for bots you want changed. Empty slots recruit new bots automatically."},
         {title="Other options",text="PARTY / RAID\nChoose the desired group size. Raid selection permits party-to-raid conversion. Use Prev / Next to edit more slots. Kept humans count toward the group size.\n\nLEVEL RANGE\n+/- 2 means bots can be two levels below or above you.\n\nBUILDS: PVE ONLY\nThe default blocks PvP-labelled builds. Allow PvP fallback is optional when your server lacks a PvE preset for the chosen spec. No available matching build means preparation stops; it will not silently pick another spec.\n\nPREVIEW SEARCH / PROTOCOL\nPreview is optional; Build / Resume already searches. Leave Protocol on Core v1 for the updated server. Legacy is for older cores."},
         {title="If it stops",text="READ THE BOTTOM STATUS MESSAGE\nFOUND or CANDIDATE is not READY. The bot still needs to join, arrive and finish preparation. A refusal, missing build or failed check is explained below the rows.\n\nBUILD / RESUME\nAfter resolving the problem, use this to continue. Confirmed work is retained when the plan is unchanged.\n\nCANCEL / CLEAR SEARCH\nCancel stops unsent work; it does not kick bots or undo completed changes. An action already sent can still finish. Closing the window does not cancel. Clear search clears candidates, not your party.\n\nUNCERTAIN GEAR RESULT\nDo not repeatedly restart. Inspect the bot and see Help before clearing a saved preparation checkpoint."}
     }

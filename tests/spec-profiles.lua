@@ -43,11 +43,20 @@ assert(choose("WARRIOR","tank","protection",{"furyprot","pve prot"}).name=="pve 
 assert(not choose("WARRIOR","tank","protection",{"prot/fury"}))
 local hybrid=choose("WARRIOR","tank","furyprot",{"pve prot","furyprot"})
 assert((hybrid~=nil)==(interface<20000),"Fury/Prot expansion gate")
-local specOptions=ManTechPB_LFGSpecOptions({role="dps",preference="SHAMAN"})
-assert(option(specOptions,"enhancement") and option(specOptions,"elemental") and not option(specOptions,"restoration"))
-specOptions=ManTechPB_LFGSpecOptions({role="dps",preference="DRUID"})
-assert(option(specOptions,"balance") and option(specOptions,"dps feral") and not option(specOptions,"tank feral"))
-assert(option(ManTechPB_LFGSpecOptions({role="tank",preference="WARRIOR"}),"furyprot")== (interface<20000))
+for _,class in pairs(classes) do
+    for _,role in ipairs({"tank","heal","dps"}) do
+        local specOptions=ManTechPB_LFGSpecOptions({role=role,preference=class})
+        assert(specOptions[1].value=="AUTO" and specOptions[1].label=="Auto by role")
+        for i,item in ipairs(specOptions) do
+            assert(i==1 or string.sub(item.value,1,6)=="BUILD:","Extra Auto family choice: "..item.value)
+        end
+    end
+end
+local tankClasses=ManTechPB_LFGClassOptions({role="tank"})
+assert(tankClasses[1].value=="ANY" and tankClasses[1].label=="Any tank")
+for _,item in ipairs(tankClasses) do
+    assert(item.label~="Any DPS" and item.value~="MELEE" and item.value~="RANGED")
+end
 assert(option(ManTechPB_LFGClassOptions({role="tank"}),"DEATHKNIGHT")== (interface>=30000))
 local oldBuildInfo=GetBuildInfo
 GetBuildInfo=function() return "2.4.3","8606","date" end

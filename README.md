@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.10.1 |
-| The Burning Crusade | 20400 | 0.10.1-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.10.1-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.10.2 |
+| The Burning Crusade | 20400 | 0.10.2-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.10.2-WotLK.1 |
 
 ## Installation
 
@@ -21,6 +21,12 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 Open the manager with `/mtp`, `/mantechpb`, or the minimap button. Each version folder also contains a detailed `README.txt`.
 
 ## Group / Raid Builder
+
+### New in 0.10.2: simpler Spec menu
+
+Choose **Auto by role**, or an **exact build appropriate for the selected role**.
+The redundant Auto family choices have been removed in Classic, TBC and Wrath.
+Exact-build validation and bot preparation behavior are unchanged.
 
 ### New in 0.10.1: exact builds for every class and version
 
