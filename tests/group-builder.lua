@@ -361,7 +361,8 @@ table.remove(candidates.MAGE,table.getn(candidates.MAGE))
 -- A departed Keep member must not leave a REVIEW ROLE blocker behind.
 reset()
 party={"Humanone"}; ManTechPB_LFGSyncMembers()
-assert(ManTechPB_LFG.slots[1].reviewRole)
+-- Simulate stale state from the older UI before that member leaves.
+ManTechPB_LFG.slots[1].reviewRole=true
 party={}; ManTechPB_LFGSyncMembers()
 assert(not ManTechPB_LFG.slots[1].reviewRole and not ManTechPB_LFG.slots[1].keepName)
 ManTechPB_LFGBuildGroup(); run()
@@ -463,13 +464,10 @@ ManTechPB_LFGBuildGroup(); run()
 assert(ManTechPB_LFGMember("Ztank") and not ManTechPB_LFGMember("Tankbot"),"declined invitation did not try an alternative")
 table.remove(candidates.WARRIOR,table.getn(candidates.WARRIOR))
 
--- Preserve humans and require an explicit role assignment.
+-- Keep humans untouched without requiring a role-confirmation click.
 reset()
 party={"Humanone"}
 ManTechPB_LFGSyncMembers()
-ManTechPB_LFGBuildGroup()
-assert(not ManTechPB_LFG.building and table.getn(trace)==0,"unreviewed human role was guessed")
-ManTechPB_LFGRoleChanged("tank",{slotIndex=1})
 ManTechPB_LFGBuildGroup(); run()
 for _,t in ipairs(trace) do assert(t.name~="Humanone" and not string.find(t.text or "",".bot gear Humanone",1,true),"human member was changed") end
 assert(table.getn(party)==4,"mixed party did not fill vacancies")
@@ -604,6 +602,44 @@ local function v1command(text)
     return true
 end
 function SendChatMessage(text,chat,lang,name) if not v1command(text) then command(text,name) end end
+
+-- Screenshot regression: fresh/reloaded builder, four existing members, one
+-- explicitly configured Paladin vacancy. No per-member confirmation clicks.
+candidates.PALADIN={{name="Paladinbot",class="PALADIN",level=43}}
+builds.PALADIN="pve dps ret"
+for _,transport in ipairs({"legacy","v1"}) do
+    v1reset()
+    R.db().mode=transport
+    party={"Tankbot","Healbot","Humanone"}
+    ManTechPB_LFG.slots=nil; ManTechPB_LFGInitialize(); ManTechPB_LFGSyncMembers()
+    for i=1,3 do
+        local slot=ManTechPB_LFG.slots[i]
+        assert(slot.keepName and not slot.reviewRole,"fresh Keep member demanded role confirmation")
+        -- Older session state must also be repaired by Build / Resume.
+        slot.reviewRole=true; slot.state="REVIEW ROLE"
+    end
+    local vacancy=ManTechPB_LFG.slots[4]
+    vacancy.preference="PALADIN"; vacancy.spec="AUTO"; vacancy.buildChoice="pve dps ret"
+    ManTechPB_LFG.range=1
+    ManTechPB_LFGBuildGroup(); run()
+    assert(table.getn(party)==4 and ManTechPB_LFGMember("Paladinbot"),transport.." fresh-roster refill failed: "..(ManTechPB_LFG.status.text or ""))
+    assert(vacancy.state=="READY" and vacancy.buildChoice=="pve dps ret","explicit replacement build lost")
+    for i=1,3 do assert(ManTechPB_LFG.slots[i].state=="KEEP" and not ManTechPB_LFG.slots[i].reviewRole,"Keep state not restored") end
+    for _,t in ipairs(trace) do
+        if t.kind=="invite" then assert(t.name=="Paladinbot","invited existing member") end
+        if t.kind=="command" then
+            assert(not t.name or t.name=="Paladinbot","sent command to kept member")
+            for _,name in ipairs({"Tankbot","Healbot","Humanone"}) do
+                assert(not string.find(t.text,name,1,true),"raw command touched kept member")
+            end
+        end
+    end
+    for _,q in ipairs(requests) do
+        assert(q.kind=="discover" or q.name=="Paladinbot","core command touched kept member")
+    end
+end
+candidates.PALADIN=nil; builds.PALADIN=nil
+print("Fresh-roster refill passed: Keep members need no role clicks; only exact Paladin replacement invited and prepared (Legacy/Core v1).")
 
 v1reset({loseGear=true,rateLimit=true})
 ManTechPB_LFGBuildGroup(); run()

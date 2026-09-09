@@ -1,4 +1,9 @@
-ManTechPB 0.10.4
+ManTechPB 0.10.5
+
+0.10.5: Keep members no longer block recruitment with REVIEW ROLE warnings.
+With four members already grouped, configure the empty slot and Build / Resume.
+No per-member confirmation clicks are needed, including after a UI reload.
+Kept roles are planning labels; kept members receive no commands or changes.
 
 0.10.4: Build / Resume clears departed members' stale role-review and prep state.
 Set the empty slot's role/class/spec to recruit and prepare a replacement.

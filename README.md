@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.10.4 |
-| The Burning Crusade | 20400 | 0.10.4-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.10.4-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.10.5 |
+| The Burning Crusade | 20400 | 0.10.5-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.10.5-WotLK.1 |
 
 ## Installation
 
@@ -21,6 +21,14 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 Open the manager with `/mtp`, `/mantechpb`, or the minimap button. Each version folder also contains a detailed `README.txt`.
 
 ## Group / Raid Builder
+
+### New in 0.10.5: Keep members no longer block filling vacancies
+
+Opening the builder with an existing party no longer requires role-confirmation
+clicks for Keep members. Configure the empty slot's role/class/spec, then Build /
+Resume. Keep members are skipped without commands or modifications. Their role
+labels describe your planned composition, not an automatic talent diagnosis.
+Stale Keep review flags are cleared. This also applies after reloading the UI.
 
 ### New in 0.10.4: resume after replacing a member
 
