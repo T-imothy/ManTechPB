@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.9.0"
+local MTPB_VERSION = "0.9.1"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -223,6 +223,8 @@ local function MTPB_IsTalentReply(message)
 end
 
 local function MTPB_ShouldHideBotChat(eventName, message, sender)
+    -- Presentation only: the separate addon event handler still receives every reply.
+    if ManTechPB_Recruit and ManTechPB_Recruit.hideWireChat and ManTechPB_Recruit.hideWireChat(eventName,message,sender) then return true end
     if not ManTechPBDB or not ManTechPBDB.hideBotReplies then return false end
     local visibleTalentBot = MTPB_VISIBLE_TALENT_QUERY_BOT
     if visibleTalentBot and GetTime() <= MTPB_VISIBLE_TALENT_QUERY_UNTIL then
@@ -290,6 +292,8 @@ end
 local function MTPB_InstallChatFilter()
     if MTPB_CHAT_FILTER_INSTALLED then return end
     if type(ChatFrame_AddMessageEventFilter) == "function" then
+        pcall(ChatFrame_AddMessageEventFilter, "CHAT_MSG_SYSTEM", MTPB_MessageEventFilter)
+        pcall(ChatFrame_AddMessageEventFilter, "CHAT_MSG_SAY", MTPB_MessageEventFilter)
         pcall(ChatFrame_AddMessageEventFilter, "CHAT_MSG_WHISPER", MTPB_MessageEventFilter)
         pcall(ChatFrame_AddMessageEventFilter, "CHAT_MSG_WHISPER_INFORM", MTPB_MessageEventFilter)
         pcall(ChatFrame_AddMessageEventFilter, "CHAT_MSG_PARTY", MTPB_MessageEventFilter)
@@ -1968,7 +1972,7 @@ function ManTechPB_LFGCandidateTooltip(button)
     if candidate.zone and candidate.zone ~= "" then GameTooltip:AddLine("Zone: " .. candidate.zone, 0.85, 0.85, 0.85) end
     GameTooltip:AddLine("Click to cycle matching candidates.", 1, 0.82, 0.35)
     GameTooltip:AddLine("Empty row: search this role. Named row: cycle candidates.", 1, 0.85, 0.4)
-    GameTooltip:AddLine("Build Group searches all roles, checks bot replies, then invites.", 1, 0.85, 0.4)
+    GameTooltip:AddLine("A candidate is not a joined member. Build / Resume rechecks candidates, then invites.", 1, 0.85, 0.4)
     GameTooltip:Show()
 end
 
@@ -2096,8 +2100,8 @@ function ManTechPB_LFGRefreshRows()
             name=slot.key==s.playerSlot and UnitName("player") or slot.keepName or slot.prepareName
             if name then row.candidate:SetText(name)
             elseif slot.candidate then row.candidate:SetText(slot.candidate.name.." "..(ManTechPB_LFGClassLabels[slot.candidate.class] or "").." "..slot.candidate.level)
-            else row.candidate:SetText("No match - Search /who") end
-            row.state:SetText(slot.reviewRole and "REVIEW ROLE" or (ManTechPB_LFGReserved(slot) and "KEEP" or slot.state or (slot.candidate and "FOUND" or "OPEN")))
+            else row.candidate:SetText(busy and "Searching for a candidate..." or "No candidate - click to search") end
+            row.state:SetText(slot.reviewRole and "REVIEW ROLE" or (ManTechPB_LFGReserved(slot) and "KEEP" or slot.state or (slot.candidate and "CANDIDATE" or "OPEN")))
             if busy then row.role:Disable(); row.dropdown:Disable(); row.source:Disable(); row.candidate:Disable()
             else
                 row.role:Enable()
@@ -2718,7 +2722,7 @@ end
 function ManTechPB_LFGReset()
     local s=ManTechPB_LFG
     if s.building or s.searching then
-        ManTechPB_LFGStop("Cancelled. Unsent steps discarded; membership and completed work kept. Build Group resumes without repeating confirmed gear."); return
+        ManTechPB_LFGStop("Cancelled. Candidate names are search results, not joined members. Members and completed work kept; Build / Resume rechecks saved candidates."); return
     end
     local i,slot
     s.candidates={}; s.rejected={}; s.slotIndex=nil

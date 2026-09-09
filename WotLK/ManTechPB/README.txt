@@ -1,4 +1,4 @@
-ManTechPB 0.9.0
+ManTechPB 0.9.1
 
 ManTechPB is a standalone CMaNGOS PlayerBots manager. It does not require the
 Mangosbot addon and does not overwrite it.
@@ -45,6 +45,12 @@ manager's own background command traffic is hidden.
 
 GROUP BUILDER
 -------------
+0.9.1: Stop each class search when enough distinct candidates fill the requested
+slots. Complete candidates kept after Preview/Cancel are reused, then freshly
+verified before inviting. CANDIDATE does not mean JOINED. Raw protocol messages
+for this addon's own IDs are hidden from chat; useful status/errors stay in the
+window. /mtprecruit debug on (or debug off) controls raw diagnostic visibility.
+
 Open LFG or /mtp lfg. Select Party (5) or Raid (10/20/25/40).
 Use the pages to assign roles and class/style preferences. Existing members default
 to Keep member. Confirm each new member's role dropdown before building; this

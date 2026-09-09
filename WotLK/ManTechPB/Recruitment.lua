@@ -1,6 +1,6 @@
 -- Optional core contract c87bc38ef3da57282b3643da8e2cbdddb28c0a45.
 -- Separate chunk keeps Vanilla's Lua 5.0 closure/upvalue limits intact.
-ManTechPB_Recruit = {base={}, epoch=0, touched={}, cancels={}, cancelIds={}, known={}, sequence=0,
+ManTechPB_Recruit = {base={}, epoch=0, touched={}, cancels={}, cancelIds={}, known={}, issued={}, sequence=0,
     classes={WARRIOR=1,PALADIN=2,HUNTER=3,ROGUE=4,PRIEST=5,DEATHKNIGHT=6,SHAMAN=7,MAGE=8,WARLOCK=9,DRUID=11}}
 local R=ManTechPB_Recruit
 R.base.send=ManTechPB_LFGSend
@@ -31,6 +31,21 @@ end
 function R.clean(text)
     text=string.gsub(text or "","|c%x%x%x%x%x%x%x%x","")
     return string.gsub(text,"|r","")
+end
+function R.rememberWire(id,text)
+    R.issued[id]={command=text,expires=GetTime()+600}
+end
+function R.hideWireChat(eventName,message,sender)
+    if R.db().debugWire then return false end
+    local text=R.clean(message)
+    local id
+    if eventName=="CHAT_MSG_SYSTEM" then
+        local a,b; a,b,id=string.find(text,"^PBRECRUIT 1 ([%w_%-]+) ")
+    elseif eventName=="CHAT_MSG_SAY" and string.gsub(sender or "","%-.*$","")==UnitName("player") then
+        local a,b; a,b,id=string.find(text,"^%.bot recruit v1 ([%w_%-]+) ")
+        if id and R.issued[id] and R.issued[id].command~=text then return false end
+    end
+    return id and R.issued[id] and R.issued[id].expires>=GetTime() and true or false
 end
 function R.status(text) ManTechPB_LFGSetStatus(text,"|cffffff00") end
 function R.slot() local s=ManTechPB_LFG; return s.slots and s.slots[s.slotIndex or 0] end
@@ -99,8 +114,10 @@ function R.sendOperation(op)
     op.sendAt=nil; op.nextRetry=GetTime()+8
     op.expires=op.expires or GetTime()+((op.kind=="summon" and 60) or (op.kind=="invite" and 35) or 28)
     if op.kind=="discover" then R.lastDiscovery=GetTime() end
-    SendChatMessage(".bot recruit v1 "..op.id.." "..op.kind.." "..
-        (op.kind=="discover" and op.args or op.guid..(op.args~="" and " "..op.args or "")),"SAY")
+    local command=".bot recruit v1 "..op.id.." "..op.kind.." "..
+        (op.kind=="discover" and op.args or op.guid..(op.args~="" and " "..op.args or ""))
+    R.rememberWire(op.id,command)
+    SendChatMessage(command,"SAY")
 end
 function R.retryable(reason)
     return reason=="busy" or reason=="discovery_rate_limit" or reason=="receipt_limit" or
@@ -150,6 +167,25 @@ function R.reply(message)
     return true
 end
 
+-- Stop collecting when the current requested composition can be matched. Counting
+-- raw class rows would incorrectly reuse the same warrior for tank and DPS slots.
+function R.planComplete(class)
+    for _,slot in ipairs(ManTechPB_LFG.slots or {}) do
+        if ManTechPB_LFGRecruitSlot(slot) and (not class or ManTechPB_LFGCandidateMatches({class=class},slot)) then
+            if not slot.candidate or not slot.candidate.guid or not ManTechPB_LFGCandidateMatches(slot.candidate,slot) then return false end
+        end
+    end
+    return true
+end
+function R.searchProgress()
+    local found,wanted=0,0
+    for _,slot in ipairs(ManTechPB_LFG.slots or {}) do
+        if ManTechPB_LFGRecruitSlot(slot) then
+            wanted=wanted+1; if slot.candidate then found=found+1 end
+        end
+    end
+    return found.."/"..wanted.." candidates (not joined yet)"
+end
 function R.discoveryDone(state,result,op)
     local s=ManTechPB_LFG
     if state~="complete" then ManTechPB_LFGStop("Bot discovery "..state..": "..result..". Core v1 is required; select Legacy for older cores."); return end
@@ -164,27 +200,42 @@ function R.discoveryDone(state,result,op)
     end
     R.cursor=cursor
     ManTechPB_LFGAssignCandidates(); ManTechPB_LFGRefreshRows()
-    ManTechPB_LFGSendNextWho(s.searchSerial,cursor~="0")
+    -- A nonzero cursor means more bots exist, not that we need to scan them.
+    ManTechPB_LFGSendNextWho(s.searchSerial,cursor~="0" and not R.planComplete(s.currentQueryClass))
 end
 function ManTechPB_LFGSendNextWho(serial,retry)
     if not R.enabled() then return R.base.nextWho(serial,retry) end
     local s=ManTechPB_LFG
     if serial~=s.searchSerial or not s.searching then return end
+    if R.reuseCandidates then
+        s.candidates=R.reuseCandidates; R.reuseCandidates=nil
+        for _,c in ipairs(s.candidates) do s.seenCandidates[c.name]=true end
+        ManTechPB_LFGAssignCandidates()
+    end
     if not retry then s.queryIndex=s.queryIndex+1; R.cursor="0" end
+    while s.queryIndex<=table.getn(s.queryClasses) and R.planComplete(s.queryClasses[s.queryIndex]) do
+        s.queryIndex=s.queryIndex+1; R.cursor="0"
+    end
     if s.queryIndex>table.getn(s.queryClasses) then
         s.searching=nil; s.waitingWho=nil; ManTechPB_LFGAssignCandidates(); ManTechPB_LFGRefreshRows()
-        if s.building then ManTechPB_LFGBeginSlots() else R.status("Core bot search complete. Build / Resume rechecks eligibility and reserves candidates before inviting.") end
+        if s.building then R.status("Candidates found. Rechecking and inviting now..."); ManTechPB_LFGBeginSlots()
+        else R.status(R.searchProgress()..". Click Build / Resume to recheck and invite.") end
         return
     end
     R.pages=(R.pages or 0)+1
     if R.pages>128 then ManTechPB_LFGStop("Discovery page limit reached. Narrow the class/level criteria."); return end
     s.currentQueryClass=s.queryClasses[s.queryIndex]
-    R.status("Core bot search: "..s.currentQueryClass.." "..s.minLevel.."-"..s.maxLevel..", page "..R.pages)
+    R.status("Searching "..(ManTechPB_LFGClassLabels[s.currentQueryClass] or s.currentQueryClass).." "..s.minLevel.."-"..s.maxLevel.." - "..R.searchProgress())
     R.request("discover","0",R.classes[s.currentQueryClass].." "..s.minLevel.." "..s.maxLevel.." "..R.cursor,
         R.discoveryDone,math.max(0,(R.lastDiscovery or -2)+2.1-GetTime()))
 end
 function ManTechPB_LFGStartSearch(index,automatic)
     if table.getn(R.cancels)>0 then R.status("Finishing cancellation/release requests before another search."); return end
+    if ManTechPB_LFG.searching then return end
+    -- Keep complete selections from a cancelled/preview search, but status-check
+    -- every bot again before any invitation. No cached eligibility is trusted.
+    R.reuseCandidates=nil
+    if R.enabled() and automatic and R.planComplete() then R.reuseCandidates=ManTechPB_LFG.candidates end
     if not ManTechPB_LFG.searching then R.pages=0; R.cursor="0" end
     return R.base.search(index,automatic)
 end
@@ -383,9 +434,14 @@ end
 
 function R.update()
     local now=GetTime(); local s=ManTechPB_LFG
+    if now>=(R.pruneAt or 0) then
+        R.pruneAt=now+30
+        for id,record in pairs(R.issued) do if now>record.expires then R.issued[id]=nil end end
+    end
     if table.getn(R.cancels)>0 and now>=(R.cancelAt or 0) then
         local c=table.remove(R.cancels,1); R.cancelIds[c.id]=true; R.cancelAt=now+0.75
-        SendChatMessage(".bot recruit v1 "..c.id.." cancel "..c.guid,"SAY")
+        local command=".bot recruit v1 "..c.id.." cancel "..c.guid
+        R.rememberWire(c.id,command); SendChatMessage(command,"SAY")
     end
     local op=R.active
     if op then
@@ -413,6 +469,11 @@ R.frame=CreateFrame("Frame"); R.frame:SetScript("OnUpdate",R.update); R.frame:Sh
 
 SLASH_MTPBRECRUIT1="/mtprecruit"
 SlashCmdList.MTPBRECRUIT=function(text)
+    if text=="debug on" or text=="debug off" then
+        R.db().debugWire=text=="debug on"
+        R.status(R.db().debugWire and "Recruitment diagnostic chat ON." or "Recruitment diagnostic chat OFF. Progress and errors remain in this window.")
+        return
+    end
     local _,_,name=string.find(text or "","^reconcile (%S+)$")
     if not name or ManTechPB_LFG.building or ManTechPB_LFG.searching then
         R.status("After inspecting uncertain gear/supplies, /mtprecruit reconcile NAME deliberately allows new preparation. Stop the builder first."); return

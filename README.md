@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.9.0 |
-| The Burning Crusade | 20400 | 0.9.0-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.9.0-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.9.1 |
+| The Burning Crusade | 20400 | 0.9.1-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.9.1-WotLK.1 |
 
 ## Installation
 
@@ -27,6 +27,8 @@ Open **LFG** or `/mtp lfg`. Choose Party (5) or a 10/20/25/40-slot raid plan. Ed
 Existing members default to **Keep member**, regardless of whether they might be bots. Confirm the role for each newly discovered member by choosing their Role dropdown. This only reserves a composition slot; it does not respec a human. Choose **Prepare bot** explicitly to include an existing bot in summoning and preparation. Your own character is always kept unchanged. Empty slots recruit bots. Humans have no class or level-range restrictions imposed by the builder.
 
 **Build / Resume** runs these phases:
+
+Search stops per class as soon as enough distinct candidates fit your selected slots; it does not exhaust the entire bot population first. A complete candidate set from Preview or Cancel is reused and freshly status-checked before invitation. Changing requirements triggers a new search when the saved set no longer fits. **CANDIDATE is not JOINED**: the status line distinguishes discovery from group membership.
 
 1. Search matching classes/levels, recheck bot eligibility and reserve before invitation; fill vacancies with confirmed joins.
 2. Summon all included bots that are not already nearby and ready.
@@ -58,6 +60,8 @@ The bottom-right **Protocol** button selects Core v1 (default) or Legacy while i
 V1 discovery returns public eligible random-holder bots, not every authorized account/guild alt. Direct Prepare selection remains useful for existing alts. Existing member GUIDs are resolved through the client where available or retained from this session's discovery. On clients without those GUIDs, that explicitly selected bot uses the legacy identification/invite/summon/prep path; it does not gain an invented authoritative arrival proof. Humans are never considered bots merely because WHO returned their name.
 
 V1 queries deduplicate classes, follow cursor pages (at most 128 pages per search), and wait at least 2.1 seconds between discovery requests. Only a matching completion commits a candidate batch; retries deduplicate candidates. Requests use stable GUIDs and unique IDs; one logical operation runs at a time. Reservations are requested immediately before inviting. Full-group/leadership races stop for review. Rate limits produce bounded waits, not request storms.
+
+Raw `PBRECRUIT` replies and outbound SAY commands for this addon's own request IDs are hidden from chat presentation, while the addon still processes them. Progress/refusal messages remain in the builder. Other players' messages, manual/unrelated IDs, and ordinary system errors are not hidden by this filter. For diagnostics, use `/mtprecruit debug on`; turn it off with `/mtprecruit debug off`.
 
 Legacy queries use `/who c-"Warrior" 41-45` for a level-43 Warrior search at +/-2, at least eight seconds apart. Avoid simultaneous manual/other-addon Who searches. Bot whispers must establish identity; `Recruitment unavailable: <reason>` and `Recruitment pending: transfer` are handled explicitly. Native invitations expire on the released core after 15 seconds; the client allows a short roster-update margin. No mode bypasses server permissions, ownership, group capacity or instance policies.
 

@@ -627,7 +627,7 @@ for i=1,40 do if i~=1 and i~=2 and i~=5 then assert(ManTechPB_LFG.slots[i].state
 assert(not mutations.Humanone and not mutations.Humantwo,"protected humans prepared")
 local pages=0
 for _,q in ipairs(requests) do if q.kind=="discover" then pages=pages+1 end end
-assert(pages==40,"cursor discovery missed pages or repeated scans")
+assert(pages==37,"cursor discovery did not stop at the 37 requested bots: "..pages)
 candidates=priorCandidates
 
 -- Cancellation keeps a pending preparation journal and allows a started teleport to finish.
@@ -651,4 +651,55 @@ ManTechPB_LFG.slots[1].candidate={name="Tankbot",class="WARRIOR",level=43}
 function UnitGUID() return "0x0000000000000101" end
 assert(R.guid(ManTechPB_LFG.slots[1])=="257","legacy client GUID not parsed")
 UnitGUID=nil
+
+-- Regression for the live report: do not exhaust priests before searching the
+-- three warrior slots. Even a large remaining cursor must stop when enough match.
+local beforeLarge=candidates
+candidates={WARRIOR={},PRIEST={}}
+for i=1,60 do
+    table.insert(candidates.WARRIOR,{name="Fastwar"..string.char(64+math.floor((i-1)/26)+1)..string.char(65+math.mod(i-1,26)),class="WARRIOR",level=43})
+    table.insert(candidates.PRIEST,{name="Fastpriest"..string.char(64+math.floor((i-1)/26)+1)..string.char(65+math.mod(i-1,26)),class="PRIEST",level=43})
+end
+v1reset()
+ManTechPB_LFG.slots[3].preference="WARRIOR"; ManTechPB_LFG.slots[4].preference="WARRIOR"
+local searchStarted=GetTime()
+ManTechPB_LFGStartSearch(); run()
+local searchCount=0
+for _,q in ipairs(requests) do if q.kind=="discover" then searchCount=searchCount+1 end end
+assert(searchCount==4,"scanned beyond one priest and three warriors: "..searchCount)
+assert(table.getn(invites)==0,"preview invited bots")
+local found={}
+for i=1,4 do local c=ManTechPB_LFG.slots[i].candidate; assert(c and not found[c.guid],"slot candidate reused"); found[c.guid]=true end
+ManTechPB_LFGStop("Cancelled search; candidates kept")
+ManTechPB_LFGBuildGroup(); run()
+local afterCount,statusCount=0,0
+for _,q in ipairs(requests) do
+    if q.kind=="discover" then afterCount=afterCount+1 end
+    if q.kind=="status" then statusCount=statusCount+1 end
+end
+assert(afterCount==searchCount,"resume repeated a complete search")
+assert(statusCount>=4 and table.getn(invites)==4,"resume did not verify before inviting")
+local firstInvite
+for _,t in ipairs(trace) do if t.kind=="invite" and not firstInvite then firstInvite=t.time end end
+-- run() deliberately adds ten idle seconds after preview, so allow that margin.
+assert(firstInvite and firstInvite-searchStarted<25,"first invitation still waits for exhaustive discovery")
+for i=1,4 do assert(ManTechPB_LFG.slots[i].state=="READY","resumed fast search not ready") end
+
+-- Chat presentation must hide only this addon's issued protocol traffic, before
+-- AND after the event consumer receives it. Unrelated/manual diagnostics remain.
+local sent=requests[1]
+local line=response(sent.id,"0","complete","cursor=0;scanned=128")
+assert(R.hideWireChat("CHAT_MSG_SYSTEM",line),"own diagnostic system spam visible")
+assert(MTPB_TEST_HOOKS.ShouldHideBotChat("CHAT_MSG_SYSTEM",line),"system presentation filter missed protocol")
+assert(not R.hideWireChat("CHAT_MSG_SYSTEM",response("manual","0","refused","arguments")),"manual core diagnostic hidden")
+assert(not R.hideWireChat("CHAT_MSG_SYSTEM","Inventory is full."),"ordinary error hidden")
+assert(not R.hideWireChat("CHAT_MSG_PARTY",line,"Friend"),"player conversation hidden")
+local outgoing=".bot recruit v1 "..sent.id.." "..sent.kind.." "..sent.args
+assert(R.hideWireChat("CHAT_MSG_SAY",outgoing,"Tester"),"own outbound protocol visible")
+assert(not R.hideWireChat("CHAT_MSG_SAY",outgoing,"Friend"),"another player's message hidden")
+SlashCmdList.MTPBRECRUIT("debug on")
+assert(not R.hideWireChat("CHAT_MSG_SYSTEM",line),"diagnostic opt-in ignored")
+SlashCmdList.MTPBRECRUIT("debug off")
+candidates=beforeLarge
+print("Fast discovery/UI regression passed: four queries for four bots, reused cancelled candidates, fresh identity checks, scoped protocol chat filtering.")
 print("Core v1 tests passed: staged party, authoritative arrival, ID replay, rate limit, uncertainty journal, correlation, full-group race, and legacy identity outcomes.")
