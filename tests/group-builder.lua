@@ -331,6 +331,43 @@ local doneCommands=table.getn(trace)
 ManTechPB_LFGBuildGroup(); run()
 for i=doneCommands+1,table.getn(trace) do assert(not string.find(trace[i].text or "",".bot gear",1,true),"resume rerolled completed gear") end
 
+-- Replace one completed bot: preserve the other three bots and their checkpoints.
+local replacementStart=table.getn(trace)
+local previousInvites=table.getn(invites)
+local replacement=ManTechPB_LFG.slots[4]
+local departed=replacement.candidate.name
+for i=table.getn(party),1,-1 do if party[i]==departed then table.remove(party,i) end end
+replacement.reviewRole=true
+ManTechPB_LFGSyncMembers()
+assert(not replacement.reviewRole and not replacement.prepareName and not replacement.recruited,"departed bot still owns slot")
+assert(not replacement.build and not replacement.supplyDone and not replacement.prepSignature and not replacement.serverArrived,"replacement inherited preparation")
+for i=1,3 do assert(ManTechPB_LFG.slots[i].readySignature and not ManTechPB_LFG.slots[i].reviewRole,"unchanged member lost confirmation") end
+table.insert(candidates.MAGE,{name="Replacementbot",class="MAGE",level=43})
+replacement.preference="MAGE"; replacement.spec="AUTO"; replacement.buildChoice=nil
+-- Reconfirming the same role must not wipe class/spec choices or READY state.
+ManTechPB_LFGRoleChanged("dps",{slotIndex=4})
+assert(replacement.preference=="MAGE","role confirmation erased replacement class")
+ManTechPB_LFGBuildGroup(); run()
+assert(table.getn(invites)==previousInvites+1 and ManTechPB_LFGMember("Replacementbot"),"replacement did not fill only vacancy")
+assert(replacement.state=="READY","replacement preparation incomplete")
+for i=replacementStart+1,table.getn(trace) do
+    local t=trace[i]
+    if t.kind=="command" and (t.text=="talents list" or string.find(t.text,"^%.bot ")) then
+        assert(t.name=="Replacementbot" or string.find(t.text," Replacementbot",1,true),"unchanged bot was prepared again")
+    end
+end
+table.remove(candidates.MAGE,table.getn(candidates.MAGE))
+
+-- A departed Keep member must not leave a REVIEW ROLE blocker behind.
+reset()
+party={"Humanone"}; ManTechPB_LFGSyncMembers()
+assert(ManTechPB_LFG.slots[1].reviewRole)
+party={}; ManTechPB_LFGSyncMembers()
+assert(not ManTechPB_LFG.slots[1].reviewRole and not ManTechPB_LFG.slots[1].keepName)
+ManTechPB_LFGBuildGroup(); run()
+assert(table.getn(party)==4,"departed Keep member blocked fresh build")
+print("Replacement regression passed: vacant roles, class changes, preserved members/checkpoints and one-bot preparation.")
+
 reset({noArrival=true})
 ManTechPB_LFGBuildGroup(); run()
 assert(contains("summon") and not contains("talents list") and not contains(".bot gear"),"unconfirmed arrival allowed prep")
@@ -583,6 +620,24 @@ end
 assert(scenario.didLimit and R.supported,"structured support/rate-limit handling missing")
 assert(not behaviors.Healbot.co.offdps and not behaviors.Healbot.co["offdps raid"],"v1 healer DPS enabled")
 for _,t in ipairs(trace) do assert(t.kind~="who","v1 used WHO discovery") end
+
+local v1replacement=ManTechPB_LFG.slots[4]
+local v1departed=v1replacement.candidate.name
+for i=table.getn(party),1,-1 do if party[i]==v1departed then table.remove(party,i) end end
+local v1new={name="Replacementbot",class="MAGE",level=43}
+table.insert(candidates.MAGE,v1new); byGuid["999"]=v1new; byName[v1new.name]="999"
+ManTechPB_LFGSyncMembers()
+v1replacement.preference="MAGE"; v1replacement.spec="AUTO"; v1replacement.buildChoice=nil
+local v1requestStart=table.getn(requests)
+ManTechPB_LFGBuildGroup(); run()
+assert(table.getn(party)==4 and ManTechPB_LFGMember(v1new.name) and v1replacement.state=="READY","v1 replacement failed: "..(ManTechPB_LFG.status.text or ""))
+for i=v1requestStart+1,table.getn(requests) do
+    local q=requests[i]
+    if q.kind=="invite" or q.kind=="prepare" then assert(q.name==v1new.name,"v1 repeated another member's invite/preparation") end
+end
+for name,ops in pairs(mutations) do for kind,count in pairs(ops) do assert(count==1,"replacement repeated "..name.." "..kind) end end
+table.remove(candidates.MAGE,table.getn(candidates.MAGE))
+print("Core v1 replacement regression passed: only replacement invited/prepared; existing checkpoints retained.")
 
 v1reset({clientOnlyArrival=true})
 ManTechPB_LFGBuildGroup(); run()

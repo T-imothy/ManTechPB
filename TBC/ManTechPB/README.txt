@@ -1,4 +1,10 @@
-ManTechPB 0.10.3
+ManTechPB 0.10.4
+
+0.10.4: Build / Resume clears departed members' stale role-review and prep state.
+Set the empty slot's role/class/spec to recruit and prepare a replacement.
+Unchanged members keep confirmed roles and completed preparation checkpoints.
+Confirming the same role no longer resets your selected class/spec.
+Unknown existing roles still require confirmation; Keep members are untouched.
 
 0.10.3: Classic recruitment hides Shaman for Alliance and Paladin for Horde.
 TBC/Wrath retain both. Existing cross-faction members remain manageable.

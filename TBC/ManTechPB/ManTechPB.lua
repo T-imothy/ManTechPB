@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.10.3"
+local MTPB_VERSION = "0.10.4"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -2104,11 +2104,21 @@ function ManTechPB_LFGSyncMembers()
         slot=s.slots[i]
         if slot.key==s.playerSlot then used[UnitName("player")]=true end
         if slot.recruited and slot.candidate and ManTechPB_LFGMember(slot.candidate.name) then used[slot.candidate.name]=true end
-        local name=slot.keepName or slot.prepareName
+        local name=slot.keepName or slot.prepareName or (slot.recruited and slot.candidate and slot.candidate.name)
         if name then
             if ManTechPB_LFGMember(name) then used[name]=true
-            else slot.keepName=nil; slot.prepareName=nil; slot.candidate=nil; slot.locked=nil; slot.state=nil; slot.readySignature=nil end
+            else
+                -- Keep the requested role/class/build, but never transfer the
+                -- departed member's review or preparation state to a replacement.
+                slot.keepName=nil; slot.prepareName=nil; slot.candidate=nil
+                slot.locked=nil; slot.recruited=nil; slot.reviewRole=nil; slot.state=nil
+                slot.readySignature=nil; slot.prepSignature=nil; slot.supplyDone=nil
+                slot.build=nil; slot.serverArrived=nil; slot.joinRun=nil; slot.joinSeenAt=nil
+                slot.manualCandidate=nil
+            end
         end
+        -- Role review belongs to a current member, not an empty recruitment slot.
+        if not slot.keepName and not slot.prepareName then slot.reviewRole=nil end
     end
     for _,member in ipairs(ManTechPB_LFGRoster()) do
         if not used[member.name] then
@@ -2145,6 +2155,11 @@ end
 
 function ManTechPB_LFGRoleChanged(value,dropdown)
     local slot=ManTechPB_LFG.slots[dropdown.slotIndex]
+    if slot.role==value then
+        slot.reviewRole=nil
+        if slot.state=="REVIEW ROLE" then slot.state=nil end
+        ManTechPB_LFGRefreshRows(); return
+    end
     slot.role=value; slot.reviewRole=nil; slot.state=nil; slot.readySignature=nil
     slot.supplyDone=nil; slot.prepSignature=nil
     slot.preference="ANY"; slot.spec="AUTO"; slot.buildChoice=nil; slot.manualCandidate=nil
