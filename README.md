@@ -1,6 +1,6 @@
 # ManTechPB
 
-ManTechPB is a standalone in-game manager for CMaNGOS PlayerBots. It provides a compact interface for party and individual bot control, role and talent setup, combat behavior, formations, loot policy, advanced class controls, and a movable bot bar.
+ManTechPB is a standalone in-game manager for CMaNGOS PlayerBots. It provides a compact interface for party and individual bot control, role and talent setup, combat behavior, formations, loot policy, advanced class controls, a staged `/who` Group Builder, and a movable bot bar.
 
 This project is a modern standalone successor inspired by the original [Mangosbot UI addon by ike3](https://github.com/ike3/mangosbot-addon). Full credit and thanks go to ike3 and the original addon contributors for pioneering the in-game PlayerBots control interface. ManTechPB is built for the actively maintained [CMaNGOS PlayerBots project](https://github.com/cmangos/playerbots).
 
@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.6.20 |
-| The Burning Crusade | 20400 | 0.6.20-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.6.20-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.7.0 |
+| The Burning Crusade | 20400 | 0.7.0-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.7.0-WotLK.1 |
 
 ## Installation
 
@@ -19,6 +19,14 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 3. Restart the client or reload the UI.
 
 Open the manager with `/mtp`, `/mantechpb`, or the minimap button. Each version folder also contains a detailed `README.txt`.
+
+## Group Builder
+
+Open Group Builder with the manager's **LFG** button or `/mtp lfg`. Select the role filled by your own character, choose class/style preferences for the other four party slots, select a level range, then run **Search /who**. ManTechPB auto-fills visible candidates; click any candidate to cycle through alternatives before choosing **Build Group**.
+
+After selected candidates accept their invitations, the builder applies a matching server-provided talent build, synchronizes PlayerBots role strategies, generates appropriate gear, and prepares supplies. Tanks receive tank-assist/pull defaults, and healers have healer DPS explicitly disabled.
+
+The standard WoW `/who` result does not identify whether a character is a PlayerBot. Always verify the four displayed names before building the group. A small optional core protocol would allow future releases to make discovery bot-only; it is not required for the staged `/who` workflow.
 
 ## Compatibility
 

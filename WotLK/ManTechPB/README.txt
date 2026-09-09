@@ -1,4 +1,4 @@
-ManTechPB 0.6.20
+ManTechPB 0.7.0
 
 ManTechPB is a standalone CMaNGOS PlayerBots manager. It does not require the
 Mangosbot addon and does not overwrite it.
@@ -25,6 +25,11 @@ Design goals:
 - top-down formation previews with confirmed and mixed-party state highlighting
 - title-bar controls use separate click and drag regions on every supported client
 - Healer DPS reads and changes combat-only offdps strategies without requiring a nonexistent non-combat copy
+- separate Group Builder window opened by LFG or /mtp lfg
+- five-role composition editor with one player role and four bot slots
+- per-slot tank, healer, DPS class/style preferences and selectable level range
+- staged /who search with visible, cycleable candidate names before invites
+- automatic server talent-build selection, role sync, gearing, supplies, tank pull/assist, and healer-DPS-off defaults
 
 Open ManTechPB with /mtp, /mantechpb, or its movable minimap button.
 Alt-left-click a PlayerBot in the 3D world to open its compact individual-control window.
@@ -37,6 +42,23 @@ by default while ManTechPB still reads it. Use the Bot Chat button or /mtp chat 
 toggle it, /mtp chat hide to hide it, and /mtp chat show to display it again.
 Manually typed talent commands remain visible with their replies even while the
 manager's own background command traffic is hidden.
+
+GROUP BUILDER
+-------------
+Click LFG in the main title bar or use /mtp lfg. Choose the role your own
+character fills, choose a class or damage style for the other four slots, and
+select a level range. Search /who fills the four bot slots with online candidates.
+Click a candidate name to cycle through other matches, then click Build Group.
+
+After the selected characters join, ManTechPB processes them in sequence. It asks each bot for this
+server's real talent builds, chooses a PvE-compatible build for the assigned role,
+synchronizes the AI role, generates gear, and prepares supplies. Tank slots receive
+Tank Assist, Pull, and Pull Back. Healer slots receive Damage Assist and explicitly
+remove every Healer DPS/offdps variant.
+
+WoW's normal /who result does not say whether a character is a PlayerBot. Verify
+the four displayed names before clicking Build Group; ordinary players can appear
+in the same class and level results.
 
 Select one bot and open Setup > Talents. ManTechPB asks that bot for the exact
 predefined builds configured on the current server; it never invents a cross-version

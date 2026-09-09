@@ -3,5 +3,5 @@
 ## Author: ManTech
 ## Notes: Standalone, guided CMaNGOS PlayerBots manager with one tabbed interface
 ## SavedVariables: ManTechPBDB
-## Version: 0.6.20-TBC.1
+## Version: 0.7.0-TBC.1
 ManTechPB.lua
