@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.9.1"
+local MTPB_VERSION = "0.9.2"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -315,6 +315,11 @@ end
 local function MTPB_SendPacket(packet)
     if packet.lfg then
         if not ManTechPB_LFG or not ManTechPB_LFG.building or packet.lfg.token~=ManTechPB_LFG.runToken then return end
+        if not ManTechPB_LFGRosterReady() then
+            -- Hold, rather than discard, queued work while Classic resolves names.
+            if ManTechPB_LFG.building and packet.lfg.token==ManTechPB_LFG.runToken then table.insert(MTPB_SEND_QUEUE,1,packet) end
+            MTPB_LAST_SEND=GetTime(); return
+        end
         if ManTechPB_LFGPacketAllowed and not ManTechPB_LFGPacketAllowed(packet) then return end
         ManTechPB_LFGPacketSent(packet)
     end
@@ -1669,17 +1674,48 @@ function ManTechPB_LFGRoster()
     if s.rosterAt==GetTime() and s.rosterStamp==stamp then return s.rosterCache end
     local count=raid>0 and raid or party+1
     local i,unit,name,label,class
+    local pending=false
+    local seen={}
     for i=1,count do
         if raid>0 then unit="raid"..i elseif i==1 then unit="player" else unit="party"..(i-1) end
         name=MTPB_BarePlayerName(UnitName(unit))
-        if name then
+        if not name or name=="" or name=="Unknown" or name==UNKNOWNOBJECT or name==UNKNOWN or seen[name] then
+            pending=true
+        else
+            seen[name]=true
             label,class=UnitClass(unit)
             table.insert(list,{name=name,unit=unit,class=ManTechPB_LFGResolveClass(class,label),level=UnitLevel(unit) or 0})
         end
     end
+    s.rosterPending=pending
     s.rosterAt=GetTime(); s.rosterStamp=stamp; s.rosterCache=list; s.memberCache={}
     for _,member in ipairs(list) do s.memberCache[member.name]=member end
     return list
+end
+
+-- A party/raid count can update before UnitName resolves. Unknown is a loading
+-- sentinel, NEVER a human role assignment or proof that an invited bot joined.
+function ManTechPB_LFGRosterReady()
+    local s=ManTechPB_LFG
+    ManTechPB_LFGRoster()
+    if not s.rosterPending then s.rosterWaitUntil=nil; return true end
+    local slot=s.slots and s.slots[s.slotIndex or 0]
+    if slot then slot.joinRun=nil; slot.joinSeenAt=nil end
+    s.rosterWaitUntil=s.rosterWaitUntil or GetTime()+10
+    if GetTime()>=s.rosterWaitUntil then
+        if s.building or s.searching then ManTechPB_LFGStop("Party names did not finish loading within 10 seconds. No unknown member was assigned or prepared; retry when names appear.") end
+    else ManTechPB_LFGSetStatus("Waiting for party member names to load before continuing...",MTPB_COLORS.yellow) end
+    return false
+end
+
+function ManTechPB_LFGPollRoster()
+    local s=ManTechPB_LFG
+    s.rosterIdlePolling=nil; s.rosterAt=nil
+    if s.building or s.searching then return end
+    if ManTechPB_LFGRosterReady() then ManTechPB_LFGSyncMembers(); ManTechPB_LFGRefreshRows()
+    elseif GetTime()<(s.rosterWaitUntil or 0) then
+        s.rosterIdlePolling=true; MTPB_Wait(0.25,ManTechPB_LFGPollRoster)
+    end
 end
 
 function ManTechPB_LFGMember(name)
@@ -1692,7 +1728,10 @@ function ManTechPB_LFGOnRosterChanged()
     s.rosterAt=nil
     if not s.slots then return end
     if s.building then ManTechPB_LFGMembershipValid()
-    elseif s.frame and s.frame:IsVisible() then ManTechPB_LFGSyncMembers(); ManTechPB_LFGRefreshRows() end
+    elseif s.frame and s.frame:IsVisible() then
+        ManTechPB_LFGSyncMembers(); ManTechPB_LFGRefreshRows()
+        if s.rosterPending and not s.rosterIdlePolling then s.rosterIdlePolling=true; MTPB_Wait(0.25,ManTechPB_LFGPollRoster) end
+    end
 end
 
 function ManTechPB_LFGPacketAllowed(packet)
@@ -1725,6 +1764,7 @@ function ManTechPB_LFGSyncMembers()
     local s=ManTechPB_LFG
     if s.building or s.searching then return end
     s.rosterAt=nil
+    if not ManTechPB_LFGRosterReady() then return end
     local used={}
     local i,slot,member
     for i=1,table.getn(s.slots) do
@@ -2558,6 +2598,7 @@ end
 
 function ManTechPB_LFGMembershipValid()
     local s=ManTechPB_LFG
+    if not ManTechPB_LFGRosterReady() then return false end
     local allowed={}
     local i,slot,name,member
     allowed[UnitName("player")]=true
@@ -2583,12 +2624,29 @@ function ManTechPB_LFGInvite(name)
     InviteByName(name)
 end
 
+function ManTechPB_LFGJoinSettled(slot)
+    local s=ManTechPB_LFG
+    if slot.joinRun~=s.runToken then slot.joinRun=s.runToken; slot.joinSeenAt=GetTime() end
+    if GetTime()-slot.joinSeenAt<2 then
+        slot.state="JOINED / WAIT"
+        ManTechPB_LFGSetStatus(slot.candidate.name.." joined. Waiting 2 seconds for the party to settle before the next bot...",MTPB_COLORS.yellow)
+        ManTechPB_LFGRefreshRows()
+        return false
+    end
+    return true
+end
+
 function ManTechPB_LFGTick(token)
     local s=ManTechPB_LFG
     if not s.building or s.runToken~=token then return end
-    if ManTechPB_LFGInBG() or not ManTechPB_LFGLeader() or (UnitAffectingCombat and UnitAffectingCombat("player")) then
+    if ManTechPB_LFGInBG() or (UnitAffectingCombat and UnitAffectingCombat("player")) then
         ManTechPB_LFGStop("Stopped: battleground/combat or leadership changed. Completed work was kept."); return
     end
+    if not ManTechPB_LFGRosterReady() then
+        if s.building then MTPB_Wait(0.25,ManTechPB_LFGTick,token) end
+        return
+    end
+    if not ManTechPB_LFGLeader() then ManTechPB_LFGStop("Stopped: leadership changed. Completed work was kept."); return end
     if not ManTechPB_LFGMembershipValid() then return end
     if s.searching then return end
     local slot=s.slots[s.slotIndex]
@@ -2599,6 +2657,7 @@ function ManTechPB_LFGTick(token)
         elseif s.verified then
             s.verifyTimeouts=0
             if ManTechPB_LFGMember(name) then
+                if not ManTechPB_LFGJoinSettled(slot) then MTPB_Wait(0.25,ManTechPB_LFGTick,token); return end
                 slot.recruited=true; slot.locked=true; slot.state="JOINED"; slot.prepareName=name
                 s.slotIndex=s.slotIndex+1; ManTechPB_LFGNextSlot()
             else
@@ -2617,12 +2676,14 @@ function ManTechPB_LFGTick(token)
         end
     elseif s.stage=="invite" then
         if ManTechPB_LFGMember(name) then
+            if not ManTechPB_LFGJoinSettled(slot) then MTPB_Wait(0.25,ManTechPB_LFGTick,token); return end
             slot.recruited=true; slot.locked=true; slot.state="JOINED"; slot.prepareName=name
             if s.size>5 and (GetNumRaidMembers and GetNumRaidMembers() or 0)==0 then
                 if not ConvertToRaid then ManTechPB_LFGStop("Raid conversion is unavailable on this client."); return end
                 s.afterConvert="next"; ManTechPB_LFGSetStage("convert","CREATE RAID",15); ConvertToRaid()
             else s.slotIndex=s.slotIndex+1; ManTechPB_LFGNextSlot() end
-        elseif GetTime()>=s.deadline then ManTechPB_LFGRejectCandidate() end
+        elseif GetTime()>=s.deadline then ManTechPB_LFGRejectCandidate()
+        else slot.joinRun=nil; slot.joinSeenAt=nil end
     elseif s.stage=="convert" then
         if (GetNumRaidMembers and GetNumRaidMembers() or 0)>0 then
             if s.afterConvert=="invite" then ManTechPB_LFGSetStage("invite","JOINING",20); ManTechPB_LFGInvite(name)
@@ -2677,6 +2738,7 @@ function ManTechPB_LFGBuildGroup()
     local s=ManTechPB_LFG
     if s.searching or s.building then return end
     ManTechPB_LFGInitialize(); ManTechPB_LFGSyncMembers()
+    if not ManTechPB_LFGRosterReady() then return end
     if ManTechPB_LFGInBG() then ManTechPB_LFGStop("Group Builder cannot run inside a battleground or arena."); return end
     if UnitAffectingCombat and UnitAffectingCombat("player") then ManTechPB_LFGStop("Leave combat before building."); return end
     if not ManTechPB_LFGLeader() then ManTechPB_LFGStop("You must be group leader."); return end

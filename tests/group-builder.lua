@@ -113,6 +113,7 @@ end
 -- Standalone deterministic Group Builder integration harness; no game/server writes.
 local pending,party,trace,invites,behaviors,nearby={}, {}, {}, {}, {}, {}
 local scenario={}
+local unresolvedNames={}
 local raidActive=false
 local candidates={
     WARRIOR={{name="Humanwar",class="WARRIOR",level=43},{name="Tankbot",class="WARRIOR",level=43}},
@@ -137,9 +138,24 @@ function UnitLevel() return 43 end
 function UnitName(unit)
     if unit=="player" then return "Tester" end
     local _,_,raidIndex=string.find(unit,"^raid(%d+)$")
-    if raidIndex then if tonumber(raidIndex)==1 then return "Tester" end; return party[tonumber(raidIndex)-1] end
+    if raidIndex then
+        if tonumber(raidIndex)==1 then return "Tester" end
+        local name=party[tonumber(raidIndex)-1]
+        if name and unresolvedNames[name] and GetTime()<unresolvedNames[name] then
+            if scenario.nilName then return nil end
+            return scenario.localizedName or "Unknown"
+        end
+        return name
+    end
     local _,_,n=string.find(unit,"^party(%d+)$")
-    if n then return party[tonumber(n)] end
+    if n then
+        local name=party[tonumber(n)]
+        if name and unresolvedNames[name] and GetTime()<unresolvedNames[name] then
+            if scenario.nilName then return nil end
+            return scenario.localizedName or "Unknown"
+        end
+        return name
+    end
 end
 local function classFor(name)
     if name=="Humanone" or name=="Humantwo" then return "PRIEST" end
@@ -171,6 +187,14 @@ function InviteByName(name)
     table.insert(invites,name); table.insert(trace,{kind="invite",name=name,time=GetTime()})
     if scenario.noJoin or (scenario.refuseName and scenario.refuseName==name) then return end
     table.insert(party,name)
+    if scenario.slowNames then
+        unresolvedNames[name]=GetTime()+scenario.slowNames
+        table.insert(trace,{kind="roster_unknown",name=name,time=GetTime()})
+    end
+    if scenario.unexpectedHuman then
+        table.insert(party,"Humanone"); unresolvedNames.Humanone=GetTime()+1
+    end
+    emit(raidActive and "RAID_ROSTER_UPDATE" or "PARTY_MEMBERS_CHANGED")
 end
 local builds={WARRIOR="pve prot",PRIEST="pve holy",MAGE="pve frost",ROGUE="pve combat"}
 local function chosenBuild(name)
@@ -242,14 +266,14 @@ local function step()
 end
 local function run()
     local n=0
-    while (ManTechPB_LFG.building or ManTechPB_LFG.searching) and n<5000 do step(); n=n+1 end
-    assert(n<5000,"unbounded workflow")
+    while (ManTechPB_LFG.building or ManTechPB_LFG.searching) and n<8000 do step(); n=n+1 end
+    assert(n<8000,"unbounded workflow")
     for i=1,100 do step() end
 end
 local function reset(options)
     ManTechPB_LFGReset()
     ManTechPB_LFGReset()
-    scenario=options or {}; party={}; pending={}; trace={}; invites={}; behaviors={}; nearby={}; raidActive=false
+    scenario=options or {}; party={}; pending={}; trace={}; invites={}; behaviors={}; nearby={}; raidActive=false; unresolvedNames={}
     ManTechPB_LFG.rosterAt=nil
     ManTechPB_LFG.slots=nil; ManTechPB_LFG.size=nil; ManTechPB_LFG.page=1
     ManTechPB_LFGInitialize()
@@ -701,5 +725,60 @@ SlashCmdList.MTPBRECRUIT("debug on")
 assert(not R.hideWireChat("CHAT_MSG_SYSTEM",line),"diagnostic opt-in ignored")
 SlashCmdList.MTPBRECRUIT("debug off")
 candidates=beforeLarge
+-- Classic can publish the member count and join event BEFORE UnitName resolves.
+-- No commands may target the next bot until a named join plus its two-second gap.
+for _,mode in ipairs({"v1","legacy"}) do
+    v1reset({slowNames=2}); R.db().mode=mode
+    ManTechPB_LFGBuildGroup(); run()
+    assert(table.getn(invites)==4,"delayed names stopped "..mode..": "..ManTechPB_LFG.status.text)
+    for i=1,4 do assert(ManTechPB_LFG.slots[i].state=="READY","delayed-name bot not prepared in "..mode) end
+    local previous
+    for _,t in ipairs(trace) do
+        if t.kind=="invite" then
+            if previous then assert(t.time-previous>=3.99,"next invite did not wait for name resolution + 2 seconds") end
+            previous=t.time
+        end
+    end
+    for _,slot in ipairs(ManTechPB_LFG.slots) do assert(slot.keepName~="Unknown","loading placeholder became a kept member") end
+end
+v1reset({slowNames=1,nilName=true})
+ManTechPB_LFGBuildGroup(); run()
+assert(table.getn(invites)==4 and ManTechPB_LFG.slots[4].state=="READY","nil roster name did not recover")
+UNKNOWNOBJECT="Unbekannt"
+v1reset({slowNames=1,localizedName=UNKNOWNOBJECT})
+ManTechPB_LFGBuildGroup(); run()
+assert(table.getn(invites)==4 and ManTechPB_LFG.slots[4].state=="READY","localized placeholder did not recover")
+UNKNOWNOBJECT=nil
+
+v1reset({slowNames=30})
+ManTechPB_LFGBuildGroup(); run()
+assert(table.getn(invites)==1 and not next(mutations),"unresolved roster allowed more invitations/prep")
+assert(string.find(ManTechPB_LFG.status.text,"10 seconds",1,true),"name timeout not reported")
+for _,slot in ipairs(ManTechPB_LFG.slots) do assert(slot.keepName~="Unknown","timed-out placeholder became human assignment") end
+
+v1reset({slowNames=2,unexpectedHuman=true})
+ManTechPB_LFGBuildGroup(); run()
+assert(table.getn(invites)==1 and not mutations.Humanone,"unknown human was treated as invited bot")
+assert(string.find(ManTechPB_LFG.status.text,"Humanone joined",1,true),"resolved unexpected human did not stop workflow")
+
+v1reset({slowNames=2}); R.db().mode="legacy"
+ManTechPB_LFGBuildGroup()
+while table.getn(invites)==0 do step() end
+local firstName=invites[1]
+assert(ManTechPB_LFG.building and ManTechPB_LFG.rosterPending,"transient roster event stopped build")
+ManTechPB_LFGSend("talents",firstName,true)
+local queuedAt=GetTime()
+run()
+local delivered
+for _,t in ipairs(trace) do if t.text=="talents" and t.name==firstName and t.time>=queuedAt then delivered=t.time; break end end
+assert(delivered and delivered-queuedAt>=1.8,"pending roster discarded or prematurely sent queued packet")
+
+v1reset({slowNames=2})
+ManTechPB_LFGBuildGroup()
+while table.getn(invites)==0 do step() end
+ManTechPB_LFGReset()
+for i=1,80 do step() end
+assert(not ManTechPB_LFG.building and table.getn(invites)==1 and not next(mutations),"cancel during unknown roster resumed operations")
+print("Roster-loading regression passed: Unknown/nil/localized names, sequential join gaps, timeout, unexpected human, held packets and cancellation.")
 print("Fast discovery/UI regression passed: four queries for four bots, reused cancelled candidates, fresh identity checks, scoped protocol chat filtering.")
 print("Core v1 tests passed: staged party, authoritative arrival, ID replay, rate limit, uncertainty journal, correlation, full-group race, and legacy identity outcomes.")

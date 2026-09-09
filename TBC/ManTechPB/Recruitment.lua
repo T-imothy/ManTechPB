@@ -91,6 +91,9 @@ end
 function R.sendOperation(op)
     if not R.valid(op) then R.active=nil; return end
     local s=ManTechPB_LFG
+    if s.building and not ManTechPB_LFGRosterReady() then
+        op.sendAt=GetTime()+0.25; return
+    end
     if s.building and (not ManTechPB_LFGMembershipValid() or not ManTechPB_LFGLeader() or
         ManTechPB_LFGInBG() or (UnitAffectingCombat and UnitAffectingCombat("player"))) then
         ManTechPB_LFGStop("Recruitment stopped: roster, leadership, combat or activity changed."); return

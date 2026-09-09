@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.9.1 |
-| The Burning Crusade | 20400 | 0.9.1-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.9.1-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.9.2 |
+| The Burning Crusade | 20400 | 0.9.2-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.9.2-WotLK.1 |
 
 ## Installation
 
@@ -29,6 +29,8 @@ Existing members default to **Keep member**, regardless of whether they might be
 **Build / Resume** runs these phases:
 
 Search stops per class as soon as enough distinct candidates fit your selected slots; it does not exhaust the entire bot population first. A complete candidate set from Preview or Cancel is reused and freshly status-checked before invitation. Changing requirements triggers a new search when the saved set no longer fits. **CANDIDATE is not JOINED**: the status line distinguishes discovery from group membership.
+
+Invitations are sequential: confirm the named member in the roster, wait two seconds for the party to settle, then continue to the next bot. Classic may report a member count before their name loads. Unknown, missing, localized placeholder or duplicate transient names hold workflow commands for up to ten seconds instead of becoming a fake human/Keep assignment. Real unexpected members still stop the builder for role review. Unresolved names time out safely. If an older release already stopped and kept a newly invited bot, explicitly confirm its role and choose Prepare bot before resuming.
 
 1. Search matching classes/levels, recheck bot eligibility and reserve before invitation; fill vacancies with confirmed joins.
 2. Summon all included bots that are not already nearby and ready.

@@ -1,4 +1,4 @@
-ManTechPB 0.9.1
+ManTechPB 0.9.2
 
 ManTechPB is a standalone CMaNGOS PlayerBots manager. It does not require the
 Mangosbot addon and does not overwrite it.
@@ -45,6 +45,12 @@ manager's own background command traffic is hidden.
 
 GROUP BUILDER
 -------------
+0.9.2: Invites remain one at a time. Confirm a named roster member, wait two
+seconds for the party to settle, then continue. Unknown/missing/localized loading
+names hold commands for up to ten seconds, never become human/Keep assignments.
+Actual unexpected players still require role review. If an older release kept
+your newly joined bot after a false stop, confirm its role and choose Prepare bot.
+
 0.9.1: Stop each class search when enough distinct candidates fill the requested
 slots. Complete candidates kept after Preview/Cancel are reused, then freshly
 verified before inviting. CANDIDATE does not mean JOINED. Raw protocol messages
