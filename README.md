@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.7.1 |
-| The Burning Crusade | 20400 | 0.7.1-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.7.1-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.8.0 |
+| The Burning Crusade | 20400 | 0.8.0-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.8.0-WotLK.1 |
 
 ## Installation
 
@@ -20,25 +20,46 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 Open the manager with `/mtp`, `/mantechpb`, or the minimap button. Each version folder also contains a detailed `README.txt`.
 
-## Group Builder
+## Group / Raid Builder
 
-Open **LFG** or `/mtp lfg`, choose your own role, the other four class/style preferences, and the level range. Click **Build Group** once. No manual invitations are required.
+Open **LFG** or `/mtp lfg`. Choose Party (5) or a 10/20/25/40-slot raid plan. Edit tank/healer/DPS roles and bot class/style preferences on the paged rows. A raid plan is a requested group size, not a claim that every dungeon supports that size.
 
-The sequence is: class/level search → bot-response check → invite/join → confirm talent preset → confirm role/settings → random gear → food, potions, consumables, reagents and ammunition. Each bot is processed in turn. Gear is not requested until its spec and settings are confirmed; every supply command waits for the server's response. READY is reserved for completed slots.
+Existing members default to **Keep member**, regardless of whether they might be bots. Confirm the role for each newly discovered member by choosing their Role dropdown. This only reserves a composition slot; it does not respec a human. Choose **Prepare bot** explicitly to include an existing bot in summoning and preparation. Your own character is always kept unchanged. Empty slots recruit bots. Humans have no class or level-range restrictions imposed by the builder.
 
-At level 43 with ±2, a Warrior query is `/who c-"Warrior" 41-45`. Queries run at least eight seconds apart, with one retry on timeout. Results appear in the Group Builder, not necessarily the Blizzard Who window. **Search /who** is an optional preview; clicking an empty row searches that role. Clicking a name cycles candidates. Build Group searches afresh and honors manually cycled names if they remain available. Avoid manual `/who` and other Who-search addons during a run: legacy responses have no request identifier.
+**Build / Resume** runs these phases:
 
-Tanks receive Tank Assist, Pull and Pull Back. Healers receive a healing preset and all Healer DPS variants OFF. Supported AoE, cooldowns, buffs and cleansing are enabled, plus food/drink and potions. Class-specific exceptions, including Death Knight strategies, are respected. Damage Assist on a healer selects hostile targets; it is not the Healer DPS switch.
+1. Search matching classes/levels and verify bot replies; fill vacant slots with confirmed joins.
+2. Summon all included bots that are not already nearby and ready.
+3. Confirm arrival for every included bot before starting any preparation.
+4. Confirm server talent presets and role settings, then random gear and supplies.
 
-The standard `/who` list cannot identify bots. Before inviting, ManTechPB looks for the existing bot `who` response and skips nonresponders or bots reporting another master, trying alternatives with a 24-probe limit. This recognizes the existing protocol; it is not authenticated bot discovery and busy bots can be skipped. Bot-only discovery with request IDs remains an optional core improvement, not an addon-side permission bypass.
+Choosing a raid size explicitly authorizes party-to-raid conversion when needed. It does not disband a raid, move existing subgroups, kick members, or steal bots from another group. You must lead the group. Battleground/arena use is blocked.
 
-Start outside combat, raids and battlegrounds, either solo or leading a compatible partial bot party. You fill one slot and four bots fill the others. Existing members must fit the selected class/level criteria and respond as available bots; nobody is automatically removed. Your server must permit respec/gear/supply commands and provide matching presets and acknowledgements. A refusal or missing confirmation stops the sequence with an explanation instead of pretending success.
+Tanks receive Tank Assist, Pull and Pull Back. Healers receive a healing preset and Healer DPS OFF. Supported AoE, cooldowns, buffs/cleansing, food/drink and potions are enabled; class-specific exceptions including Death Knights are respected. Gear follows confirmed talents/settings. Each food, potion, consumable, reagent and ammunition operation waits for its server reply.
 
-**Cancel** discards unsent steps but keeps already joined bots and completed changes. Closing the window does not cancel. Restarting Build Group repeats setup, including random gear. Other addon command controls are paused during a build to prevent conflicting changes. This does not summon the party to a dungeon or override bot recruitment, equipment, inventory or command-permission rules.
+### Summons, interruptions and resume
+
+The existing bot `summon` command is used; normal server policy still applies. Arrival requires an online, alive, noncombat unit that is visible and within the client's follow-interaction distance. Visibility and interaction range prevent treating a same-map/different-instance bot as nearby. A sent command or accepted teleport alone is not success.
+
+Each bot gets at most two summon requests over a 45-second arrival window. Dead/ghost, combat, loading, inaccessible destinations or denied summons stop prep if readiness never becomes true. No addon-side resurrection or forced teleport is attempted. Human/Keep members are never summoned or prepared.
+
+Failed invitations try alternative candidates. Candidate exhaustion permits one additional paced search, not an endless loop. New/unexpected members, departures or leadership changes stop the run for review; humans are not overwritten to satisfy an old plan. Existing groups must fit the selected size and every existing member must be accounted for.
+
+**Cancel** drops unsent steps without undoing completed changes or removing members. **Build / Resume** retains in-session confirmed gear/supply checkpoints for the same bot, role and build. Completed steps are not repeated. Changing a role or explicitly choosing Prepare bot again deliberately clears that slot's checkpoint. Checkpoints do not survive UI reload/logout, and a lost server acknowledgement cannot prove whether a command executed; the future core protocol needs idempotent requests for that case. Closing the window does not cancel.
+
+### Discovery limitations / pending core integration
+
+This version still uses legacy `/who` and bot `who` replies. The normal `/who` list does **not** prove bot identity. No new core endpoint is assumed or invented.
+
+**The known pre-invite reply-permission problem still requires the core task's fix or a defined replacement protocol.** On affected cores the builder cannot safely auto-invite unverified candidates and will stop with an explanation. It does not bypass this by inviting arbitrary human results. Bots reporting another master are skipped; normal invitations cannot pull candidates out of another group. Server restrictions on summons, respecs, gear and supplies also remain authoritative.
+
+Queries are deduplicated by class, not repeated per raid slot. At level 43 +/-2 a Warrior query is `/who c-"Warrior" 41-45`. They run at least eight seconds apart with one timeout retry. Preview /who is optional; empty rows search their role and named candidates cycle alternatives. Avoid competing Who-search addons/manual queries during a run because legacy replies have no request ID. Results may also be server-capped.
+
+Recruitment is sequential, with a bounded probe budget (at most 120 for large plans), at most three consecutive unanswered identification probes, one replacement search round, and one active invite/summon/prep step at a time. Roster reads are cached within a tick. This limits this client; server-wide throttling, reliable bot-only discovery, reservation conflicts and authoritative arrival/identity remain core responsibilities.
 
 ### Verification
 
-`tests/group-builder.lua` is a deterministic mocked-client integration test, not a live multiplayer test. Run with a Lua 5.0 interpreter and the addon Lua path as its first argument. It covers one-click setup, class/level queries, bot checking, command ordering, missing responses, refusals, cancellation, partial parties and raid/combat guards. Real server permissions and response formats still require in-game validation.
+`tests/group-builder.lua` is a deterministic mocked-client integration test, not live server or visual verification. Run with Lua 5.0 and the addon Lua path as the first argument. It covers full-group-before-summon and arrival-before-prep ordering, dead/refused summons, missing replies, replacement invites, cancellation, partial resume without repeated confirmed gear, protected human members, paged editing, solo-to-raid conversion, and a 40-slot mock raid with three kept humans plus 37 bots and two class queries. Live server permissions, response formats and actual server-wide load still require validation.
 
 ## Compatibility
 

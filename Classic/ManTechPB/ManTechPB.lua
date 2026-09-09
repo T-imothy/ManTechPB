@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.7.1"
+local MTPB_VERSION = "0.8.0"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -311,6 +311,7 @@ end
 local function MTPB_SendPacket(packet)
     if packet.lfg then
         if not ManTechPB_LFG or not ManTechPB_LFG.building or packet.lfg.token~=ManTechPB_LFG.runToken then return end
+        if ManTechPB_LFGPacketAllowed and not ManTechPB_LFGPacketAllowed(packet) then return end
         ManTechPB_LFGPacketSent(packet)
     end
     if packet.raw or packet.chat == "SAY" or packet.chat == "GUILD" then
@@ -616,7 +617,7 @@ local MTPB_HELP_PAGES = {
     },
     GROUP = {
         title="Group Builder",
-        text="Choose your role, four classes/styles and the level range; click Build Group once. It searches, checks bot replies, invites, confirms talents and settings, then gears and supplies each bot. READY means every stage confirmed.\n\nSearch /who is optional. Empty rows search that role; names cycle candidates. Level 43 +/-2 searches 41-45. Results appear here. Queries are paced; avoid other /who searches during a run.\n\nTank gets Tank Assist/Pull. Healer gets a healing spec and Healer DPS OFF. Supported AoE, cooldowns, buffs, recovery and potions are enabled.\n\nStart solo or lead a compatible bot party, outside combat/raids/BGs. Bots must answer and the server must allow setup commands. Nonresponders are skipped; refusals/timeouts stop later steps. See README.txt for limits.\n\nCancel discards unsent steps; it does not undo changes or remove bots. Closing does not cancel. Rebuilding repeats random gear. Other addon commands pause during a build."
+        text="Choose Party (5) or a paged raid plan. Set roles and bot classes. Existing members default to Keep member: confirm their role dropdown without changing their character. Choose Prepare bot only for existing bots you want included.\n\nBuild / Resume fills vacancies, summons included bots, confirms ALL arrivals, then sets talents/roles, gear and supplies. Raid sizes authorize conversion. Kept humans are never modified or summoned.\n\nInvite failures try alternatives. New members pause the run for review. Summon acceptance is not arrival: dead, combat, loading or distant bots must become ready before prep.\n\nCore permissions still apply. Missing pre-invite replies need the core identification fix; unverified humans are not invited. See README.txt for limits.\n\nCancel keeps joined bots and confirmed prep checkpoints. Resume skips those steps in this UI session. Changing a role or reselecting Prepare bot resets that slot. Closing does not cancel."
     }
 }
 
@@ -1633,19 +1634,186 @@ ManTechPB_LFGClassLabels = {
 }
 
 function ManTechPB_LFGInitialize()
-    if not ManTechPB_LFG.slots then
-        ManTechPB_LFG.slots = {
-            {key="TANK", label="Tank", role="tank", preference="ANY"},
-            {key="HEALER", label="Healer", role="heal", preference="ANY"},
-            {key="DPS1", label="DPS 1", role="dps", preference="ANY"},
-            {key="DPS2", label="DPS 2", role="dps", preference="ANY"},
-            {key="DPS3", label="DPS 3", role="dps", preference="ANY"}
-        }
+    local s=ManTechPB_LFG
+    if not s.slots then
+        s.slots={{key="TANK",label="Tank",role="tank",preference="ANY"},
+            {key="HEALER",label="Healer",role="heal",preference="ANY"},
+            {key="DPS1",label="DPS 1",role="dps",preference="ANY"},
+            {key="DPS2",label="DPS 2",role="dps",preference="ANY"},
+            {key="DPS3",label="DPS 3",role="dps",preference="ANY"}}
     end
-    ManTechPB_LFG.playerSlot = ManTechPBDB and ManTechPBDB.lfgPlayerSlot or ManTechPB_LFG.playerSlot or "DPS3"
-    ManTechPB_LFG.range = ManTechPBDB and ManTechPBDB.lfgLevelRange or ManTechPB_LFG.range or 2
-    ManTechPB_LFG.candidates = ManTechPB_LFG.candidates or {}
-    ManTechPB_LFG.searchSerial = ManTechPB_LFG.searchSerial or 0
+    s.playerSlot=s.playerSlot or (ManTechPBDB and ManTechPBDB.lfgPlayerSlot) or "DPS3"
+    s.range=s.range or (ManTechPBDB and ManTechPBDB.lfgLevelRange) or 2
+    s.size=s.size or 5; s.page=s.page or 1; s.candidates=s.candidates or {}
+    s.searchSerial=s.searchSerial or 0
+end
+
+function ManTechPB_LFGReserved(slot)
+    return slot and (slot.key==ManTechPB_LFG.playerSlot or slot.keepName)
+end
+
+function ManTechPB_LFGRecruitSlot(slot)
+    return not ManTechPB_LFGReserved(slot) and not slot.prepareName
+end
+
+function ManTechPB_LFGRoster()
+    local s=ManTechPB_LFG
+    local list={}
+    local raid=GetNumRaidMembers and GetNumRaidMembers() or 0
+    local party=GetNumPartyMembers and GetNumPartyMembers() or 0
+    local stamp=raid..":"..party
+    if s.rosterAt==GetTime() and s.rosterStamp==stamp then return s.rosterCache end
+    local count=raid>0 and raid or party+1
+    local i,unit,name,label,class
+    for i=1,count do
+        if raid>0 then unit="raid"..i elseif i==1 then unit="player" else unit="party"..(i-1) end
+        name=MTPB_BarePlayerName(UnitName(unit))
+        if name then
+            label,class=UnitClass(unit)
+            table.insert(list,{name=name,unit=unit,class=ManTechPB_LFGResolveClass(class,label),level=UnitLevel(unit) or 0})
+        end
+    end
+    s.rosterAt=GetTime(); s.rosterStamp=stamp; s.rosterCache=list; s.memberCache={}
+    for _,member in ipairs(list) do s.memberCache[member.name]=member end
+    return list
+end
+
+function ManTechPB_LFGMember(name)
+    ManTechPB_LFGRoster()
+    return ManTechPB_LFG.memberCache[name]
+end
+
+function ManTechPB_LFGOnRosterChanged()
+    local s=ManTechPB_LFG
+    s.rosterAt=nil
+    if not s.slots then return end
+    if s.building then ManTechPB_LFGMembershipValid()
+    elseif s.frame and s.frame:IsVisible() then ManTechPB_LFGSyncMembers(); ManTechPB_LFGRefreshRows() end
+end
+
+function ManTechPB_LFGPacketAllowed(packet)
+    local s=ManTechPB_LFG
+    if not ManTechPB_LFGMembershipValid() then return false end
+    local slot=s.slots[s.slotIndex or 0]
+    if not slot or ManTechPB_LFGReserved(slot) then ManTechPB_LFGStop("Protected member: command blocked."); return false end
+    if s.phase=="prep" and not ManTechPB_LFGArrival(slot.candidate.name) then
+        ManTechPB_LFGStop(slot.candidate.name.." is no longer ready nearby. Unsent prep was cancelled."); return false
+    end
+    return true
+end
+
+function ManTechPB_LFGLeader()
+    if (GetNumRaidMembers and GetNumRaidMembers() or 0)>0 then return IsRaidLeader and IsRaidLeader() end
+    return (GetNumPartyMembers and GetNumPartyMembers() or 0)==0 or (IsPartyLeader and IsPartyLeader())
+end
+
+function ManTechPB_LFGInBG()
+    local _,kind
+    if IsInInstance then _,kind=IsInInstance(); if kind=="pvp" or kind=="arena" then return true end end
+    if GetBattlefieldStatus then
+        local i
+        for i=1,3 do if GetBattlefieldStatus(i)=="active" then return true end end
+    end
+    return false
+end
+
+function ManTechPB_LFGSyncMembers()
+    local s=ManTechPB_LFG
+    if s.building or s.searching then return end
+    s.rosterAt=nil
+    local used={}
+    local i,slot,member
+    for i=1,table.getn(s.slots) do
+        slot=s.slots[i]
+        if slot.key==s.playerSlot then used[UnitName("player")]=true end
+        if slot.recruited and slot.candidate and ManTechPB_LFGMember(slot.candidate.name) then used[slot.candidate.name]=true end
+        local name=slot.keepName or slot.prepareName
+        if name then
+            if ManTechPB_LFGMember(name) then used[name]=true
+            else slot.keepName=nil; slot.prepareName=nil; slot.candidate=nil; slot.locked=nil; slot.state=nil; slot.readySignature=nil end
+        end
+    end
+    for _,member in ipairs(ManTechPB_LFGRoster()) do
+        if not used[member.name] then
+            for i=1,table.getn(s.slots) do
+                slot=s.slots[i]
+                if slot.key~=s.playerSlot and not slot.keepName and not slot.prepareName and not slot.locked then
+                    slot.keepName=member.name; slot.candidate=nil; slot.reviewRole=true; slot.state="REVIEW ROLE"
+                    used[member.name]=true; break
+                end
+            end
+        end
+    end
+end
+
+function ManTechPB_LFGSetSize(value)
+    local s=ManTechPB_LFG
+    if s.building or s.searching then return end
+    value=tonumber(value)
+    if value~=5 and value~=10 and value~=20 and value~=25 and value~=40 then return end
+    if table.getn(ManTechPB_LFGRoster())>value then ManTechPB_LFGSetStatus("The selected size is smaller than your current group."); return end
+    local i
+    if value<s.size then
+        for i=value+1,s.size do
+            if s.slots[i].keepName or s.slots[i].prepareName or s.slots[i].key==s.playerSlot then
+                ManTechPB_LFGSetStatus("Move reserved members into the first "..value.." slots before reducing the size."); return
+            end
+        end
+    end
+    for i=s.size+1,value do s.slots[i]={key="SLOT"..i,label="Slot "..i,role="dps",preference="ANY"} end
+    for i=s.size,value+1,-1 do s.slots[i]=nil end
+    s.size=value; s.page=1
+    ManTechPB_LFGSyncMembers(); ManTechPB_LFGRefreshRows()
+end
+
+function ManTechPB_LFGRoleChanged(value,dropdown)
+    local slot=ManTechPB_LFG.slots[dropdown.slotIndex]
+    slot.role=value; slot.reviewRole=nil; slot.state=nil; slot.readySignature=nil
+    slot.supplyDone=nil; slot.prepSignature=nil
+    slot.preference="ANY"; slot.manualCandidate=nil
+    if not slot.prepareName and not slot.recruited then slot.candidate=nil end
+    ManTechPB_LFGRefreshRows()
+end
+
+function ManTechPB_LFGSourceChanged(value,dropdown)
+    local s=ManTechPB_LFG
+    local slot=s.slots[dropdown.slotIndex]
+    if slot.key==s.playerSlot then return end
+    local name=slot.keepName or slot.prepareName or (slot.recruited and slot.candidate and slot.candidate.name)
+    if not name then
+        ManTechPB_LFGSetStatus("This is an empty recruitment slot. Existing members are assigned automatically when the window opens."); return
+    end
+    if value=="AUTO" then ManTechPB_LFGSetStatus("Existing members cannot be ignored. Keep them or explicitly prepare a bot."); return end
+    if value=="KEEP" then slot.keepName=name; slot.prepareName=nil; slot.candidate=nil; slot.recruited=nil; slot.locked=nil
+    elseif value=="PREP" then slot.prepareName=name; slot.keepName=nil; slot.recruited=nil; slot.readySignature=nil; slot.locked=nil; slot.supplyDone=nil; slot.prepSignature=nil end
+    slot.state=nil; slot.reviewRole=nil
+    ManTechPB_LFGRefreshRows()
+end
+
+function ManTechPB_LFGSetMenu(dropdown,values)
+    dropdown.values=values; dropdown.options=dropdown.options or {}
+    local i,option
+    for i=1,table.getn(values) do
+        option=dropdown.options[i]
+        if not option then
+            option=CreateFrame("Button",nil,dropdown.menu,"UIPanelButtonTemplate")
+            dropdown.options[i]=option; option:SetWidth(dropdown:GetWidth()-6); option:SetHeight(21)
+            option:SetPoint("TOPLEFT",dropdown.menu,"TOPLEFT",3,-3-(i-1)*22)
+            ManTechPB_StyleButton(option,11); option:SetScript("OnClick",ManTechPB_LFGSelectDropdown)
+        end
+        option.value=values[i].value; option.label=values[i].label; option.dropdown=dropdown
+        option:SetText(option.label); option:Show()
+    end
+    for i=table.getn(values)+1,table.getn(dropdown.options) do dropdown.options[i]:Hide() end
+    dropdown.menu:SetHeight(table.getn(values)*22+6)
+    dropdown:SetText(ManTechPB_LFGDropdownText(dropdown))
+end
+
+function ManTechPB_LFGPage(delta)
+    local s=ManTechPB_LFG
+    ManTechPB_LFGCloseDropdown()
+    s.page=math.max(1,math.min(math.ceil(s.size/8),s.page+delta))
+    ManTechPB_LFGRefreshRows()
 end
 
 function ManTechPB_LFGInterface()
@@ -1744,8 +1912,10 @@ function ManTechPB_CreateLFGDropdown(parent, x, y, width, values, selected, chan
     menu:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=8,insets={left=2,right=2,top=2,bottom=2}})
     menu:SetBackdropColor(0.02,0.05,0.08,0.99); menu:SetBackdropBorderColor(0.20,0.65,0.86,1)
     local i, option
+    button.options={}
     for i = 1, table.getn(values) do
         option = CreateFrame("Button", nil, menu, "UIPanelButtonTemplate")
+        button.options[i]=option
         option:SetWidth(width-6); option:SetHeight(21); option:SetPoint("TOPLEFT", menu, "TOPLEFT", 3, -3-(i-1)*22)
         option:SetText(values[i].label); option.value=values[i].value; option.label=values[i].label; option.dropdown=button
         ManTechPB_StyleButton(option, 10); option:SetScript("OnClick", ManTechPB_LFGSelectDropdown)
@@ -1806,7 +1976,7 @@ function ManTechPB_LFGUsedNames(exceptIndex)
     local used, i, slot = {}, 1
     for i = 1, table.getn(ManTechPB_LFG.slots) do
         slot = ManTechPB_LFG.slots[i]
-        if i ~= exceptIndex and slot.key ~= ManTechPB_LFG.playerSlot and slot.candidate then used[slot.candidate.name] = true end
+        if i ~= exceptIndex and not ManTechPB_LFGReserved(slot) and slot.candidate then used[slot.candidate.name] = true end
     end
     return used
 end
@@ -1852,7 +2022,7 @@ function ManTechPB_LFGAssignCandidates()
     local j,candidate
     for i=1,table.getn(s.slots) do
         slot=s.slots[i]
-        if not locked[i] and slot.key~=s.playerSlot and slot.manualCandidate then
+        if not locked[i] and ManTechPB_LFGRecruitSlot(slot) and slot.manualCandidate then
             for j=1,table.getn(s.candidates) do
                 candidate=s.candidates[j]
                 if candidate.name==slot.manualCandidate and not owners[candidate.name] and ManTechPB_LFGCandidateMatches(candidate,slot) then
@@ -1868,7 +2038,7 @@ function ManTechPB_LFGAssignCandidates()
         return ad<bd
     end)
     for i=1,table.getn(s.slots) do
-        if s.slots[i].key~=s.playerSlot and not locked[i] then ManTechPB_LFGAssignPath(i,owners,locked,{}) end
+        if ManTechPB_LFGRecruitSlot(s.slots[i]) and not locked[i] then ManTechPB_LFGAssignPath(i,owners,locked,{}) end
     end
     ManTechPB_LFGRefreshRows()
 end
@@ -1890,29 +2060,49 @@ function ManTechPB_LFGAssignPath(index,owners,locked,seen)
 end
 
 function ManTechPB_LFGRefreshRows()
-    if not ManTechPB_LFG.rows then return end
-    local busy=ManTechPB_LFG.building or ManTechPB_LFG.searching
-    if ManTechPB_LFG.resetButton then ManTechPB_LFG.resetButton:SetText(busy and "Cancel" or "Reset") end
-    local controls={ManTechPB_LFG.searchButton,ManTechPB_LFG.buildButton,ManTechPB_LFG.playerDropdown,ManTechPB_LFG.rangeDropdown}
-    local j
-    for j=1,table.getn(controls) do if busy then controls[j]:Disable() else controls[j]:Enable() end end
-    local i, slot, row, candidate
-    for i = 1, table.getn(ManTechPB_LFG.slots) do
-        slot, row = ManTechPB_LFG.slots[i], ManTechPB_LFG.rows[i]
-        if row then
-            if slot.key == ManTechPB_LFG.playerSlot then
-                row.dropdown:Disable(); row.candidate:Disable(); row.candidate:SetText("You fill this role")
-                row.state:SetText(MTPB_COLORS.gold .. "PLAYER|r")
+    local s=ManTechPB_LFG
+    if not s.rows then return end
+    local busy=s.building or s.searching
+    s.resetButton:SetText(busy and "Cancel" or "Clear search")
+    local _,control
+    for _,control in ipairs({s.searchButton,s.buildButton,s.sizeDropdown,s.rangeDropdown}) do
+        if busy then control:Disable() else control:Enable() end
+    end
+    s.sizeDropdown.value=s.size; s.sizeDropdown:SetText(ManTechPB_LFGDropdownText(s.sizeDropdown))
+    local pages=math.ceil(s.size/8)
+    s.page=math.max(1,math.min(pages,s.page or 1))
+    s.pageLabel:SetText("Page "..s.page.."/"..pages)
+    local i,index,slot,row,name,member,role
+    local counts={tank=0,heal=0,dps=0}
+    local protected=0
+    for i=1,table.getn(s.slots) do
+        slot=s.slots[i]; counts[slot.role]=counts[slot.role]+1
+        if ManTechPB_LFGReserved(slot) then protected=protected+1 end
+    end
+    s.summary:SetText(counts.tank.." tank / "..counts.heal.." healer / "..counts.dps.." DPS | "..protected.." kept unchanged / "..(s.size-protected).." bot slots")
+    for i=1,8 do
+        index=(s.page-1)*8+i; slot=s.slots[index]; row=s.rows[i]
+        for _,control in ipairs({row.label,row.role,row.dropdown,row.source,row.candidate,row.state}) do
+            if slot then control:Show() else control:Hide() end
+        end
+        if slot then
+            row.label:SetText(tostring(index))
+            row.role.slotIndex=index; row.role.value=slot.role; row.role:SetText(ManTechPB_LFGDropdownText(row.role))
+            row.dropdown.slotIndex=index; row.dropdown.value=slot.preference
+            ManTechPB_LFGSetMenu(row.dropdown,ManTechPB_LFGClassOptions(slot))
+            row.source.slotIndex=index; row.source.value=ManTechPB_LFGReserved(slot) and "KEEP" or (slot.prepareName and "PREP" or "AUTO")
+            row.source:SetText(ManTechPB_LFGDropdownText(row.source))
+            row.candidate.slotIndex=index
+            name=slot.key==s.playerSlot and UnitName("player") or slot.keepName or slot.prepareName
+            if name then row.candidate:SetText(name)
+            elseif slot.candidate then row.candidate:SetText(slot.candidate.name.." "..(ManTechPB_LFGClassLabels[slot.candidate.class] or "").." "..slot.candidate.level)
+            else row.candidate:SetText("No match - Search /who") end
+            row.state:SetText(slot.reviewRole and "REVIEW ROLE" or (ManTechPB_LFGReserved(slot) and "KEEP" or slot.state or (slot.candidate and "FOUND" or "OPEN")))
+            if busy then row.role:Disable(); row.dropdown:Disable(); row.source:Disable(); row.candidate:Disable()
             else
-                if busy then row.dropdown:Disable(); row.candidate:Disable() else row.dropdown:Enable(); row.candidate:Enable() end
-                candidate=slot.candidate
-                if candidate then
-                    row.candidate:SetText(candidate.name .. "  " .. ManTechPB_LFGClassLabels[candidate.class] .. " " .. candidate.level)
-                    row.state:SetText((slot.state=="READY" and MTPB_COLORS.green or MTPB_COLORS.yellow) .. (slot.state or "FOUND") .. "|r")
-                else
-                    row.candidate:SetText("No match - Search /who")
-                    row.state:SetText(MTPB_COLORS.gray .. "OPEN|r")
-                end
+                row.role:Enable()
+                if name then row.dropdown:Disable(); row.candidate:Disable() else row.dropdown:Enable(); row.candidate:Enable() end
+                if slot.key==s.playerSlot then row.source:Disable() else row.source:Enable() end
             end
         end
     end
@@ -1922,7 +2112,7 @@ function ManTechPB_LFGSearchClasses(onlyIndex)
     local wanted, result, i, j, slot, options, class = {}, {}
     for i = 1, table.getn(ManTechPB_LFG.slots) do
         slot = ManTechPB_LFG.slots[i]
-        if slot.key ~= ManTechPB_LFG.playerSlot and (not onlyIndex or onlyIndex==i) then
+        if ManTechPB_LFGRecruitSlot(slot) and not slot.locked and (not onlyIndex or onlyIndex==i) then
             options = ManTechPB_LFGClassOptions(slot)
             for j = 1, table.getn(options) do
                 class = options[j].value
@@ -1976,13 +2166,13 @@ function ManTechPB_LFGSendNextWho(serial, retry)
     end,serial,s.queryIndex,s.queryAttempt)
 end
 
-function ManTechPB_LFGStartSearch(index, automatic)
+function ManTechPB_LFGStartSearch(index,automatic)
     local s=ManTechPB_LFG
     if s.searching or (s.building and not automatic) then return end
     if not SendWho or not GetNumWhoResults or not GetWhoInfo then ManTechPB_LFGStop("This client does not expose the Who API."); return end
     ManTechPB_LFGCloseDropdown()
-    s.searchSerial=(s.searchSerial or 0)+1
-    s.searching=true; s.candidates={}; s.seenCandidates={}; s.queryIndex=0
+    s.searchSerial=(s.searchSerial or 0)+1; s.searching=true; s.queryIndex=0
+    s.candidates={}; s.seenCandidates={}
     s.restoreWhoToUI=FriendsFrame and FriendsFrame.IsVisible and FriendsFrame:IsVisible() and 1 or 0
     s.queryClasses=ManTechPB_LFGSearchClasses(type(index)=="number" and index or nil)
     local level=UnitLevel("player") or 1
@@ -1990,22 +2180,15 @@ function ManTechPB_LFGStartSearch(index, automatic)
     local cap=80
     if ManTechPB_LFGInterface()<20000 then cap=60 elseif ManTechPB_LFGInterface()<30000 then cap=70 end
     s.maxLevel=math.min(cap,level+s.range)
-    local i,name,class,label
-    -- Retain current party members; never kick or replace them automatically.
-    for i=1,(GetNumPartyMembers and GetNumPartyMembers() or 0) do
-        name=MTPB_BarePlayerName(UnitName("party"..i))
-        label,class=UnitClass("party"..i)
-        if name then
-            class=ManTechPB_LFGResolveClass(class,label)
-            if class then
-                table.insert(s.candidates,{name=name,class=class,level=UnitLevel("party"..i) or 0,existing=true})
-                s.seenCandidates[name]=true
-            end
-        end
+    local i,slot,member
+    for i=1,table.getn(s.slots) do
+        slot=s.slots[i]
+        if slot.prepareName then
+            member=ManTechPB_LFGMember(slot.prepareName)
+            if member and member.class then slot.candidate={name=member.name,class=member.class,level=member.level}; slot.locked=true end
+        elseif not slot.locked then slot.candidate=nil; slot.state=nil end
     end
-    for i=1,table.getn(s.slots) do s.slots[i].candidate=nil; s.slots[i].state=nil; s.slots[i].locked=nil end
-    ManTechPB_LFGRefreshRows()
-    ManTechPB_LFGSendNextWho(s.searchSerial)
+    ManTechPB_LFGRefreshRows(); ManTechPB_LFGSendNextWho(s.searchSerial)
 end
 
 function ManTechPB_LFGResolveClass(token,label)
@@ -2036,7 +2219,7 @@ function ManTechPB_LFGHandleWhoResults()
         name,guild,level,race,label,zone,token=GetWhoInfo(i)
         class=ManTechPB_LFGResolveClass(token,label); name=MTPB_BarePlayerName(name)
         if name and class==s.currentQueryClass and level and level>=s.minLevel and level<=s.maxLevel and
-            name~=MTPB_BarePlayerName(UnitName("player")) and not s.seenCandidates[name] then
+            name~=MTPB_BarePlayerName(UnitName("player")) and not ManTechPB_LFGMember(name) and not s.seenCandidates[name] then
             table.insert(s.candidates,{name=name,class=class,level=level,guild=guild or "",zone=zone or ""})
             s.seenCandidates[name]=true
         end
@@ -2085,6 +2268,7 @@ function ManTechPB_LFGSetStage(stage,label,timeout)
     local s=ManTechPB_LFG
     s.stage=stage; s.armed={}; s.deadline=GetTime()+(timeout or 15)+table.getn(MTPB_SEND_QUEUE)*0.35
     local slot=s.slots[s.slotIndex or 1]
+    s.page=math.ceil((s.slotIndex or 1)/8)
     if slot and slot.candidate then
         slot.state=label
         ManTechPB_LFGSetStatus(slot.label.." - "..slot.candidate.name..": "..label..". Waiting for confirmation...",MTPB_COLORS.yellow)
@@ -2217,7 +2401,9 @@ function ManTechPB_LFGSystemReply(message)
     local prefix=s.supplyCommand..": "..slot.candidate.name.." - "
     if string.sub(clean,1,string.len(prefix))==prefix then
         local result=MTPB_Trim(string.sub(clean,string.len(prefix)+1))
-        if result==s.supplyExpected then s.supplyConfirmed=true
+        if result==s.supplyExpected then
+            s.supplyConfirmed=true
+            slot.supplyDone=slot.supplyDone or {}; slot.supplyDone[s.supplyIndex]=true
         else ManTechPB_LFGStop(slot.candidate.name.." - "..s.supplyCommand.." refused: "..result) end
     elseif string.find(string.lower(clean),"you cannot control bots yet",1,true) or
         string.find(string.lower(clean),"playerbot system is currently disabled",1,true) then
@@ -2230,9 +2416,13 @@ function ManTechPB_LFGSupply()
     local slot=s.slots[s.slotIndex]
     local steps={{"gear","random gear equipped"},{"food","food added"},{"potions","potions added"},
         {"consumes","consumables added"},{"reagents","reagents added"},{"ammo","ok"}}
+    local signature=ManTechPB_LFGReadySignature(slot)..":"..(slot.build and slot.build.name or "")
+    if slot.prepSignature~=signature then slot.prepSignature=signature; slot.supplyDone={} end
+    slot.supplyDone=slot.supplyDone or {}
     s.supplyIndex=(s.supplyIndex or 0)+1
+    while s.supplyIndex<=table.getn(steps) and slot.supplyDone[s.supplyIndex] do s.supplyIndex=s.supplyIndex+1 end
     if s.supplyIndex>table.getn(steps) then
-        slot.state="READY"; slot.locked=true
+        slot.state="READY"; slot.locked=true; slot.readySignature=ManTechPB_LFGReadySignature(slot)
         s.slotIndex=s.slotIndex+1; ManTechPB_LFGNextSlot(); return
     end
     s.supplyCommand=steps[s.supplyIndex][1]; s.supplyExpected=steps[s.supplyIndex][2]; s.supplyConfirmed=nil
@@ -2267,80 +2457,185 @@ end
 function ManTechPB_LFGRejectCandidate()
     local s=ManTechPB_LFG
     local slot=s.slots[s.slotIndex]
-    if MTPB_IsCurrentPartyMember(slot.candidate.name) then
-        ManTechPB_LFGStop(slot.candidate.name..": no available-bot confirmation. Existing party members were not removed."); return
+    if ManTechPB_LFGMember(slot.candidate.name) then
+        ManTechPB_LFGStop(slot.candidate.name..": bot identity could not be confirmed. Existing member unchanged."); return
     end
     s.rejected=s.rejected or {}; s.rejected[slot.candidate.name]=true
-    slot.candidate=nil
+    slot.candidate=nil; slot.manualCandidate=nil
     ManTechPB_LFGAssignCandidates()
+    if not slot.candidate and (s.researchCount or 0)<1 then
+        s.researchCount=(s.researchCount or 0)+1
+        ManTechPB_LFGStartSearch(nil,true); return
+    end
     ManTechPB_LFGNextSlot()
 end
 
 function ManTechPB_LFGBeginSlots()
     local s=ManTechPB_LFG
-    local i,slot,used=1,nil,{}
+    local i,slot
     for i=1,table.getn(s.slots) do
         slot=s.slots[i]
-        if slot.key~=s.playerSlot then
-            if not slot.candidate then ManTechPB_LFGStop("No match for "..slot.label..". Widen the level range or choose another class."); return end
-            used[slot.candidate.name]=true
+        if not ManTechPB_LFGReserved(slot) and not slot.candidate then
+            ManTechPB_LFGStop("No matching candidate for slot "..i..". Search is bounded; adjust class/level choices and retry."); return
         end
     end
-    for i=1,(GetNumPartyMembers and GetNumPartyMembers() or 0) do
-        if not used[MTPB_BarePlayerName(UnitName("party"..i))] then
-            ManTechPB_LFGStop("An existing member does not fit the selected roles/level range. Nobody was removed. Adjust the choices first."); return
-        end
-    end
-    s.slotIndex=1; ManTechPB_LFGNextSlot()
+    s.phase="recruit"; s.slotIndex=1; ManTechPB_LFGNextSlot()
     MTPB_Wait(0.25,ManTechPB_LFGTick,s.runToken)
+end
+
+function ManTechPB_LFGReadySignature(slot)
+    return (slot.candidate and slot.candidate.name or "")..":"..slot.role..":"..slot.preference
+end
+
+function ManTechPB_LFGArrival(name)
+    local member=ManTechPB_LFGMember(name)
+    if not member then return false,"not in the group" end
+    local unit=member.unit
+    if not UnitIsVisible or not CheckInteractDistance or not UnitIsConnected or not UnitIsDeadOrGhost then return false,"arrival APIs unavailable" end
+    if not UnitIsConnected(unit) then return false,"offline or loading" end
+    if UnitIsDeadOrGhost(unit) then return false,"dead/ghost; waiting for the server's summon/revival policy" end
+    if UnitAffectingCombat and UnitAffectingCombat(unit) then return false,"in combat" end
+    if not UnitIsVisible(unit) or not CheckInteractDistance(unit,4) then return false,"not loaded nearby (same instance, follow range)" end
+    return true,"nearby and alive"
+end
+
+function ManTechPB_LFGNextSlot()
+    local s=ManTechPB_LFG
+    while s.slotIndex<=table.getn(s.slots) and ManTechPB_LFGReserved(s.slots[s.slotIndex]) do
+        s.slots[s.slotIndex].state="KEEP"; s.slotIndex=s.slotIndex+1
+    end
+    if s.slotIndex>table.getn(s.slots) then
+        if s.phase=="recruit" then s.phase="arrival"; s.slotIndex=1; ManTechPB_LFGNextSlot()
+        elseif s.phase=="arrival" then s.phase="prep"; s.slotIndex=1; ManTechPB_LFGNextSlot()
+        else
+            local i,slot
+            for i=1,table.getn(s.slots) do
+                slot=s.slots[i]
+                if not ManTechPB_LFGReserved(slot) and (not ManTechPB_LFGArrival(slot.candidate.name) or slot.readySignature~=ManTechPB_LFGReadySignature(slot)) then
+                    ManTechPB_LFGStop("A bot is no longer ready nearby. Completed work was kept; review and resume."); return
+                end
+            end
+            ManTechPB_LFGStop("Ready: included bots joined, arrived and completed preparation. All Keep members were left unchanged.",true)
+        end
+        return
+    end
+    local slot=s.slots[s.slotIndex]
+    if not slot.candidate then ManTechPB_LFGStop("Candidate missing for slot "..s.slotIndex); return end
+    local name=slot.candidate.name
+    if s.phase=="recruit" then
+        if slot.recruited and ManTechPB_LFGMember(name) then s.slotIndex=s.slotIndex+1; ManTechPB_LFGNextSlot(); return end
+        s.probes=(s.probes or 0)+1
+        if s.probes>math.min(120,math.max(24,s.size*3)) then ManTechPB_LFGStop("Recruitment attempt limit reached. Existing members were kept."); return end
+        s.verified=nil; s.unavailable=nil
+        ManTechPB_LFGSetStage("verify","VERIFY BOT",10)
+        ManTechPB_LFGSend("who",name,true,"who")
+    elseif s.phase=="arrival" then
+        if ManTechPB_LFGArrival(name) then
+            slot.state="ARRIVED"; s.slotIndex=s.slotIndex+1; ManTechPB_LFGNextSlot(); return
+        end
+        s.summonAttempts=0
+        ManTechPB_LFGSetStage("arrival","SUMMON",45)
+        s.nextSummon=GetTime()
+    else
+        if not ManTechPB_LFGArrival(name) then ManTechPB_LFGStop(name.." is not ready nearby; preparation has not started."); return end
+        if slot.readySignature==ManTechPB_LFGReadySignature(slot) then
+            slot.state="READY"; s.slotIndex=s.slotIndex+1; ManTechPB_LFGNextSlot(); return
+        end
+        MTPB_BOTS[name]=MTPB_BOTS[name] or {}
+        local data=MTPB_BOTS[name]
+        data.class=slot.candidate.class; data.online=true; data.talentBuilds={}
+        data.talentBuildsServer=nil; data.talentBuildsCollectUntil=nil; data.talentBuildsQueryPending=true
+        MTPB_TALENT_QUERY_BOT=name; MTPB_PENDING_TALENT_SYNCS[name]=nil
+        ManTechPB_LFGSetStage("builds","READ BUILDS",15)
+        ManTechPB_LFGSend("talents list",name,true,"builds")
+    end
+end
+
+function ManTechPB_LFGMembershipValid()
+    local s=ManTechPB_LFG
+    local allowed={}
+    local i,slot,name,member
+    allowed[UnitName("player")]=true
+    for i=1,table.getn(s.slots) do
+        slot=s.slots[i]; name=slot.keepName or slot.prepareName or (slot.candidate and slot.candidate.name)
+        if name then
+            allowed[name]=true
+            if (slot.keepName or slot.prepareName or slot.recruited) and not ManTechPB_LFGMember(name) then
+                ManTechPB_LFGStop(name.." left. Review the roster before continuing; nobody was removed."); return false
+            end
+        end
+    end
+    for _,member in ipairs(ManTechPB_LFGRoster()) do
+        if not allowed[member.name] then
+            ManTechPB_LFGStop("Roster changed: "..member.name.." joined. Assign their role before continuing; no changes were made to them."); return false
+        end
+    end
+    if table.getn(ManTechPB_LFGRoster())>s.size then ManTechPB_LFGStop("Group now exceeds the requested size."); return false end
+    return true
 end
 
 function ManTechPB_LFGTick(token)
     local s=ManTechPB_LFG
-    if not s.building or s.runToken~=token or s.searching then return end
-    if (GetNumRaidMembers and GetNumRaidMembers() or 0)>0 or (UnitAffectingCombat and UnitAffectingCombat("player")) then
-        ManTechPB_LFGStop("Stopped: entered combat or a raid. Already completed steps were kept."); return
+    if not s.building or s.runToken~=token then return end
+    if ManTechPB_LFGInBG() or not ManTechPB_LFGLeader() or (UnitAffectingCombat and UnitAffectingCombat("player")) then
+        ManTechPB_LFGStop("Stopped: battleground/combat or leadership changed. Completed work was kept."); return
     end
-    if (GetNumPartyMembers and GetNumPartyMembers() or 0)>0 and IsPartyLeader and not IsPartyLeader() then
-        ManTechPB_LFGStop("Party leadership changed; setup stopped."); return
-    end
-    local i,member
-    for i=1,table.getn(s.slots) do
-        member=s.slots[i]
-        if member.locked and member.candidate and not MTPB_IsCurrentPartyMember(member.candidate.name) then
-            ManTechPB_LFGStop(member.candidate.name.." left the party; setup stopped."); return
-        end
-    end
+    if not ManTechPB_LFGMembershipValid() then return end
+    if s.searching then return end
     local slot=s.slots[s.slotIndex]
     if not slot or not slot.candidate then ManTechPB_LFGStop("Candidate lost; stopped safely."); return end
     local name=slot.candidate.name
-    if s.stage~="verify" and s.stage~="invite" and not MTPB_IsCurrentPartyMember(name) then
-        ManTechPB_LFGStop(name.." left the party; setup stopped."); return
-    end
     if s.stage=="verify" then
-        if s.unavailable or (GetTime()>=s.deadline and not s.verified) then ManTechPB_LFGRejectCandidate()
+        if s.unavailable then ManTechPB_LFGRejectCandidate()
         elseif s.verified then
-            ManTechPB_LFGSetStage("invite","JOINING",20)
-            if not MTPB_IsCurrentPartyMember(name) then
-                if GetNumPartyMembers and GetNumPartyMembers()>=4 then ManTechPB_LFGStop("Party filled unexpectedly; no invite sent."); return end
-                InviteByName(name)
+            s.verifyTimeouts=0
+            if ManTechPB_LFGMember(name) then
+                slot.recruited=true; slot.locked=true; slot.state="JOINED"; slot.prepareName=name
+                s.slotIndex=s.slotIndex+1; ManTechPB_LFGNextSlot()
+            else
+                if table.getn(ManTechPB_LFGRoster())>=s.size then ManTechPB_LFGStop("Group filled; no further invitation sent."); return end
+                if s.size>5 and (GetNumRaidMembers and GetNumRaidMembers() or 0)==0 and table.getn(ManTechPB_LFGRoster())>1 then
+                    if not ConvertToRaid then ManTechPB_LFGStop("Raid conversion API unavailable."); return end
+                    s.afterConvert="invite"; ManTechPB_LFGSetStage("convert","CREATE RAID",15); ConvertToRaid()
+                else ManTechPB_LFGSetStage("invite","JOINING",20); InviteByName(name) end
             end
+        elseif GetTime()>=s.deadline then
+            s.verifyTimeouts=(s.verifyTimeouts or 0)+1
+            if s.verifyTimeouts>=3 then
+                ManTechPB_LFGStop("No pre-invite bot replies. Core identification/permission support may be missing. No unverified players were invited."); return
+            end
+            ManTechPB_LFGRejectCandidate()
         end
-    elseif s.stage=="invite" and MTPB_IsCurrentPartyMember(name) then
-        slot.locked=true
-        MTPB_BOTS[name]=MTPB_BOTS[name] or {}
-        local data=MTPB_BOTS[name]
-        data.class=slot.candidate.class; data.online=true
-        data.talentBuilds={}; data.talentBuildsServer=nil; data.talentBuildsCollectUntil=nil
-        data.talentBuildsQueryPending=true; MTPB_TALENT_QUERY_BOT=name
-        MTPB_PENDING_TALENT_SYNCS[name]=nil
-        ManTechPB_LFGSetStage("builds","READ BUILDS",15)
-        ManTechPB_LFGSend("talents list",name,true,"builds")
+    elseif s.stage=="invite" then
+        if ManTechPB_LFGMember(name) then
+            slot.recruited=true; slot.locked=true; slot.state="JOINED"; slot.prepareName=name
+            if s.size>5 and (GetNumRaidMembers and GetNumRaidMembers() or 0)==0 then
+                if not ConvertToRaid then ManTechPB_LFGStop("Raid conversion is unavailable on this client."); return end
+                s.afterConvert="next"; ManTechPB_LFGSetStage("convert","CREATE RAID",15); ConvertToRaid()
+            else s.slotIndex=s.slotIndex+1; ManTechPB_LFGNextSlot() end
+        elseif GetTime()>=s.deadline then ManTechPB_LFGRejectCandidate() end
+    elseif s.stage=="convert" then
+        if (GetNumRaidMembers and GetNumRaidMembers() or 0)>0 then
+            if s.afterConvert=="invite" then ManTechPB_LFGSetStage("invite","JOINING",20); InviteByName(name)
+            else s.slotIndex=s.slotIndex+1; ManTechPB_LFGNextSlot() end
+        end
+    elseif s.stage=="arrival" then
+        local arrived,reason=ManTechPB_LFGArrival(name)
+        if arrived then
+            slot.state="ARRIVED"; s.slotIndex=s.slotIndex+1; ManTechPB_LFGNextSlot()
+        else
+            if reason=="arrival APIs unavailable" then ManTechPB_LFGStop(reason.."; cannot safely confirm a summon."); return end
+            if GetTime()>=s.nextSummon and s.summonAttempts<2 then
+                s.summonAttempts=s.summonAttempts+1; s.nextSummon=GetTime()+20
+                ManTechPB_LFGSend("summon",name,true)
+            end
+            ManTechPB_LFGSetStatus(name..": waiting for arrival - "..reason..". Summon requests: "..s.summonAttempts.."/2.",MTPB_COLORS.yellow)
+        end
     elseif s.stage=="builds" then
         local data=MTPB_BOTS[name]
         if data and data.talentBuildsServer and data.talentBuildsCollectUntil and GetTime()>data.talentBuildsCollectUntil then
             slot.build=ManTechPB_LFGFindBuild(slot,data)
-            if not slot.build then ManTechPB_LFGStop(name..": server has no matching "..slot.role.." build. Talents and gear unchanged."); return end
+            if not slot.build then ManTechPB_LFGStop(name..": no matching server build; talents and gear unchanged."); return end
             ManTechPB_LFGSetStage("talents","SPEC",18)
             s.talentsConfirmed=nil; data.currentTalentBuild=nil
             ManTechPB_LFGSend("talents "..slot.build.name,name,true,"talents")
@@ -2357,14 +2652,14 @@ function ManTechPB_LFGTick(token)
                 ManTechPB_LFGSend("#a react ?",name,false,"react")
             end
         elseif s.nextTalentQuery and GetTime()>=s.nextTalentQuery then
-            ManTechPB_LFGSend("talents",name,true)
-            s.nextTalentQuery=GetTime()+5
+            ManTechPB_LFGSend("talents",name,true); s.nextTalentQuery=GetTime()+5
         end
     elseif s.stage=="settings" and s.confirmed.co and s.confirmed.nc and s.confirmed.react then
         s.supplyIndex=0; ManTechPB_LFGSupply()
     elseif s.stage=="supply" and s.supplyConfirmed then ManTechPB_LFGSupply() end
+    if s.searching then return end
     if s.building and GetTime()>=s.deadline then
-        ManTechPB_LFGStop(name..": "..s.stage.." was not confirmed. Setup stopped; no later steps were sent. Check bot replies/permissions.")
+        ManTechPB_LFGStop(name..": "..s.stage.." not confirmed. Server policy or a transient state blocked progress; no later steps sent.")
     end
     if s.building then MTPB_Wait(0.25,ManTechPB_LFGTick,token) end
 end
@@ -2372,13 +2667,31 @@ end
 function ManTechPB_LFGBuildGroup()
     local s=ManTechPB_LFG
     if s.searching or s.building then return end
-    ManTechPB_LFGInitialize()
-    if (GetNumRaidMembers and GetNumRaidMembers() or 0)>0 then ManTechPB_LFGStop("Build a five-player party outside raids and battlegrounds."); return end
-    if UnitAffectingCombat and UnitAffectingCombat("player") then ManTechPB_LFGStop("Leave combat before building the group."); return end
-    if (GetNumPartyMembers and GetNumPartyMembers() or 0)>0 and IsPartyLeader and not IsPartyLeader() then
-        ManTechPB_LFGStop("You must lead the party to invite and configure this group."); return
+    ManTechPB_LFGInitialize(); ManTechPB_LFGSyncMembers()
+    if ManTechPB_LFGInBG() then ManTechPB_LFGStop("Group Builder cannot run inside a battleground or arena."); return end
+    if UnitAffectingCombat and UnitAffectingCombat("player") then ManTechPB_LFGStop("Leave combat before building."); return end
+    if not ManTechPB_LFGLeader() then ManTechPB_LFGStop("You must be group leader."); return end
+    if s.size==5 and (GetNumRaidMembers and GetNumRaidMembers() or 0)>0 then ManTechPB_LFGStop("Select a raid size for this raid. No automatic disband/conversion to party."); return end
+    local i,slot,name
+    local used={}
+    for i=1,table.getn(s.slots) do
+        slot=s.slots[i]
+        name=slot.key==s.playerSlot and UnitName("player") or slot.keepName or slot.prepareName
+        if slot.reviewRole then ManTechPB_LFGStop("Choose/confirm the role for "..slot.keepName.." in slot "..i.." first."); return end
+        if name then
+            if used[name] or not ManTechPB_LFGMember(name) then ManTechPB_LFGStop("Duplicate or missing reserved member: "..name); return end
+            used[name]=true
+        end
+        if slot.candidate and ManTechPB_LFGMember(slot.candidate.name) and slot.recruited then slot.locked=true
+        elseif not slot.prepareName then slot.locked=nil; slot.recruited=nil; slot.readySignature=nil end
     end
-    s.runToken=(s.runToken or 0)+1; s.building=true; s.rejected={}; s.probes=0
+    if table.getn(ManTechPB_LFGRoster())>s.size then ManTechPB_LFGStop("Existing group exceeds selected size."); return end
+    s.runToken=(s.runToken or 0)+1; s.building=true; s.rejected={}; s.probes=0; s.verifyTimeouts=0; s.researchCount=0
+    -- Selecting a raid size is explicit authorization to convert this party.
+    if s.size>5 and (GetNumRaidMembers and GetNumRaidMembers() or 0)==0 and (GetNumPartyMembers and GetNumPartyMembers() or 0)>0 then
+        if not ConvertToRaid then ManTechPB_LFGStop("Raid conversion API unavailable."); return end
+        ConvertToRaid()
+    end
     ManTechPB_LFGStartSearch(nil,true)
 end
 
@@ -2389,7 +2702,7 @@ function ManTechPB_LFGStop(message,success)
     s.runToken=(s.runToken or 0)+1; s.searchSerial=(s.searchSerial or 0)+1
     if wasSearching and SetWhoToUI then SetWhoToUI(s.restoreWhoToUI or 0) end
     local slot=s.slots and s.slots[s.slotIndex or 0]
-    if slot and not success and slot.state~="READY" then slot.state="STOPPED" end
+    if slot and not success and not ManTechPB_LFGReserved(slot) and slot.state~="READY" then slot.state="STOPPED" end
     if MTPB_TALENT_QUERY_BOT and slot and slot.candidate and MTPB_TALENT_QUERY_BOT==slot.candidate.name then MTPB_TALENT_QUERY_BOT=nil end
     local i=table.getn(MTPB_SEND_QUEUE)
     while i>0 do if MTPB_SEND_QUEUE[i].lfg then table.remove(MTPB_SEND_QUEUE,i) end; i=i-1 end
@@ -2400,57 +2713,75 @@ end
 function ManTechPB_LFGReset()
     local s=ManTechPB_LFG
     if s.building or s.searching then
-        ManTechPB_LFGStop("Cancelled. Unsent steps were discarded; joined bots and completed changes were kept."); return
+        ManTechPB_LFGStop("Cancelled. Unsent steps discarded; membership and completed work kept. Build Group resumes without repeating confirmed gear."); return
     end
-    s.candidates={}; s.seenCandidates={}; s.rejected={}
-    local i
-    for i=1,table.getn(s.slots) do s.slots[i].candidate=nil; s.slots[i].locked=nil; s.slots[i].state=nil; s.slots[i].manualCandidate=nil end
-    s.slotIndex=nil
-    ManTechPB_LFGRefreshRows(); ManTechPB_LFGSetStatus("Choose roles, classes and level range; click Build Group.",MTPB_COLORS.gray)
+    local i,slot
+    s.candidates={}; s.rejected={}; s.slotIndex=nil
+    for i=1,table.getn(s.slots) do
+        slot=s.slots[i]; slot.manualCandidate=nil
+        if not slot.recruited then slot.candidate=nil; slot.locked=nil; slot.state=nil end
+    end
+    ManTechPB_LFGSyncMembers(); ManTechPB_LFGRefreshRows()
+    ManTechPB_LFGSetStatus("Choices and completed prep kept. Change a slot's role to deliberately prepare it again.",MTPB_COLORS.gray)
 end
 
 function ManTechPB_CreateLFGFrame()
     ManTechPB_LFGInitialize()
-    if ManTechPB_LFG.frame then return end
-    local f=CreateFrame("Frame","ManTechPBLFGFrame",UIParent); ManTechPB_LFG.frame=f
-    f:SetWidth(660); f:SetHeight(490); f:SetFrameStrata("DIALOG"); f:SetScale(1.04); f:SetMovable(true); f:EnableMouse(true); f:SetClampedToScreen(true)
+    local s=ManTechPB_LFG
+    if s.frame then return end
+    local f=CreateFrame("Frame","ManTechPBLFGFrame",UIParent); s.frame=f
+    f:SetWidth(860); f:SetHeight(620); f:SetFrameStrata("DIALOG"); f:SetMovable(true); f:EnableMouse(true); f:SetClampedToScreen(true)
     f:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=24,insets={left=8,right=8,top=8,bottom=8}})
-    f:SetBackdropColor(0.025,0.035,0.055,0.99); f:SetBackdropBorderColor(0.08,0.58,0.78,1); f:SetPoint("CENTER",UIParent,"CENTER",0,20)
-    local drag=CreateFrame("Button",nil,f); drag:SetPoint("TOPLEFT",f,"TOPLEFT",10,-7); drag:SetPoint("TOPRIGHT",f,"TOPRIGHT",-92,-7); drag:SetHeight(34)
-    drag:RegisterForDrag("LeftButton"); drag:SetScript("OnDragStart",function() f:StartMoving() end); drag:SetScript("OnDragStop",function() f:StopMovingOrSizing() end)
-    local title=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); title:SetPoint("TOPLEFT",f,"TOPLEFT",18,-16); title:SetText(MTPB_COLORS.gold.."GROUP BUILDER|r"); ManTechPB_SetReadableFont(title,14,"OUTLINE")
-    local close=CreateFrame("Button",nil,f,"UIPanelCloseButton"); close:SetPoint("TOPRIGHT",f,"TOPRIGHT",3,3); close:SetScript("OnClick",function() ManTechPB_LFGCloseDropdown(); f:Hide() end)
-    local help=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); help:SetWidth(48); help:SetHeight(22); help:SetPoint("TOPRIGHT",f,"TOPRIGHT",-36,-9); help:SetText("Help"); ManTechPB_StyleButton(help,11); help:SetScript("OnClick",function() ManTechPB_ShowHelp("GROUP") end)
-    local intro=f:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); intro:SetPoint("TOPLEFT",f,"TOPLEFT",18,-45); intro:SetWidth(582); intro:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(intro,11,"")
-    intro:SetText(MTPB_COLORS.gray.."Choose your role, classes and level range, then Build Group. It searches, verifies bots, invites, confirms specs/settings, then gears and supplies them. Search /who is an optional preview.|r")
-    local yourLabel=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); yourLabel:SetPoint("TOPLEFT",f,"TOPLEFT",20,-79); yourLabel:SetText("Your role"); ManTechPB_SetReadableFont(yourLabel,12,"OUTLINE")
-    local playerValues={{value="TANK",label="Tank"},{value="HEALER",label="Healer"},{value="DPS1",label="DPS 1"},{value="DPS2",label="DPS 2"},{value="DPS3",label="DPS 3"}}
-    ManTechPB_LFG.playerDropdown=ManTechPB_CreateLFGDropdown(f,94,-72,110,playerValues,ManTechPB_LFG.playerSlot,ManTechPB_LFGPlayerRoleChanged)
-    local rangeLabel=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); rangeLabel:SetPoint("TOPLEFT",f,"TOPLEFT",230,-79); rangeLabel:SetText("Level range"); ManTechPB_SetReadableFont(rangeLabel,12,"OUTLINE")
-    local rangeValues={{value=0,label="Exact level"},{value=1,label="+/- 1 level"},{value=2,label="+/- 2 levels"},{value=3,label="+/- 3 levels"},{value=5,label="+/- 5 levels"}}
-    ManTechPB_LFG.rangeDropdown=ManTechPB_CreateLFGDropdown(f,315,-72,120,rangeValues,ManTechPB_LFG.range,ManTechPB_LFGRangeChanged)
-    local headers={{"ROLE",20},{"CLASS / STYLE",113},{"WHO CANDIDATE (CLICK TO CYCLE)",265},{"STATE",540}}
-    local i, h
-    for i=1,table.getn(headers) do h=f:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); h:SetPoint("TOPLEFT",f,"TOPLEFT",headers[i][2],-113); h:SetText(MTPB_COLORS.blue..headers[i][1].."|r"); ManTechPB_SetReadableFont(h,10,"OUTLINE") end
-    ManTechPB_LFG.rows={}
-    for i=1,table.getn(ManTechPB_LFG.slots) do
-        local slot=ManTechPB_LFG.slots[i]; local row={}; ManTechPB_LFG.rows[i]=row
-        row.label=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); row.label:SetPoint("TOPLEFT",f,"TOPLEFT",20,-139-(i-1)*45); row.label:SetText(slot.label); ManTechPB_SetReadableFont(row.label,12,"OUTLINE")
-        row.dropdown=ManTechPB_CreateLFGDropdown(f,108,-131-(i-1)*45,140,ManTechPB_LFGClassOptions(slot),slot.preference,ManTechPB_LFGPreferenceDropdownChanged); row.dropdown.slotIndex=i
-        row.candidate=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); row.candidate:SetWidth(260); row.candidate:SetHeight(25); row.candidate:SetPoint("TOPLEFT",f,"TOPLEFT",260,-131-(i-1)*45); ManTechPB_StyleButton(row.candidate,11)
-        row.candidate.slotIndex=i; row.candidate:SetScript("OnClick",ManTechPB_LFGCandidateClicked)
-        row.candidate:SetScript("OnEnter",ManTechPB_LFGCandidateTooltip); row.candidate:SetScript("OnLeave",function() GameTooltip:Hide() end)
-        row.state=f:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); row.state:SetPoint("LEFT",row.candidate,"RIGHT",10,0); row.state:SetWidth(96); ManTechPB_SetReadableFont(row.state,10,"OUTLINE")
+    f:SetBackdropColor(0.025,0.035,0.055,0.99); f:SetBackdropBorderColor(0.08,0.58,0.78,1); f:SetPoint("CENTER",UIParent,"CENTER",0,0)
+    if UIParent.GetWidth and UIParent.GetHeight then
+        local width,height=UIParent:GetWidth(),UIParent:GetHeight()
+        if type(width)=="number" and type(height)=="number" and width>400 and height>300 then f:SetScale(math.min(1,(width-24)/860,(height-24)/620)) end
     end
-    local search=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); search:SetWidth(130); search:SetHeight(30); search:SetPoint("BOTTOMLEFT",f,"BOTTOMLEFT",18,88); search:SetText("Search /who"); ManTechPB_StyleButton(search,12); search:SetScript("OnClick",function() ManTechPB_LFGStartSearch() end); ManTechPB_LFG.searchButton=search
-    local buildButton=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); buildButton:SetWidth(150); buildButton:SetHeight(30); buildButton:SetPoint("LEFT",search,"RIGHT",10,0); buildButton:SetText("Build Group"); ManTechPB_StyleButton(buildButton,12); buildButton:SetScript("OnClick",ManTechPB_LFGBuildGroup); ManTechPB_LFG.buildButton=buildButton
-    local reset=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); reset:SetWidth(90); reset:SetHeight(30); reset:SetPoint("LEFT",buildButton,"RIGHT",10,0); reset:SetText("Reset"); ManTechPB_StyleButton(reset,12); reset:SetScript("OnClick",ManTechPB_LFGReset); ManTechPB_LFG.resetButton=reset
-    ManTechPB_LFG.status=f:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); ManTechPB_LFG.status:SetPoint("BOTTOMLEFT",f,"BOTTOMLEFT",18,17); ManTechPB_LFG.status:SetWidth(624); ManTechPB_LFG.status:SetHeight(64); ManTechPB_LFG.status:SetJustifyV("TOP"); ManTechPB_LFG.status:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(ManTechPB_LFG.status,11,"")
-    f:Hide(); ManTechPB_LFGRefreshRows(); ManTechPB_LFGSetStatus("Choose roles, classes and level range; click Build Group.",MTPB_COLORS.gray)
+    local drag=CreateFrame("Button",nil,f); drag:SetPoint("TOPLEFT",f,"TOPLEFT",10,-7); drag:SetPoint("TOPRIGHT",f,"TOPRIGHT",-100,-7); drag:SetHeight(32)
+    drag:RegisterForDrag("LeftButton"); drag:SetScript("OnDragStart",function() f:StartMoving() end); drag:SetScript("OnDragStop",function() f:StopMovingOrSizing() end)
+    local title=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); title:SetPoint("TOPLEFT",f,"TOPLEFT",18,-16); title:SetText("GROUP / RAID BUILDER"); ManTechPB_SetReadableFont(title,14,"OUTLINE")
+    local close=CreateFrame("Button",nil,f,"UIPanelCloseButton"); close:SetPoint("TOPRIGHT",f,"TOPRIGHT",3,3); close:SetScript("OnClick",function() ManTechPB_LFGCloseDropdown(); f:Hide() end)
+    local help=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); help:SetWidth(48); help:SetHeight(24); help:SetPoint("TOPRIGHT",f,"TOPRIGHT",-36,-10); help:SetText("Help")
+    ManTechPB_StyleButton(help,12); help:SetScript("OnClick",function() ManTechPB_ShowHelp("GROUP") end)
+    local intro=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); intro:SetPoint("TOPLEFT",f,"TOPLEFT",20,-47); intro:SetWidth(818); intro:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(intro,12,"")
+    intro:SetText("Fill slots -> summon included bots -> confirm arrival -> spec/settings -> gear/supplies. Keep members are never modified. Choosing a raid size authorizes party-to-raid conversion.")
+    s.sizeDropdown=ManTechPB_CreateLFGDropdown(f,20,-91,156,{{value=5,label="Party (5)"},{value=10,label="Raid (10)"},{value=20,label="Raid (20)"},{value=25,label="Raid (25)"},{value=40,label="Raid (40)"}},s.size,ManTechPB_LFGSetSize)
+    s.rangeDropdown=ManTechPB_CreateLFGDropdown(f,190,-91,142,{{value=0,label="Exact level"},{value=1,label="+/- 1 level"},{value=2,label="+/- 2 levels"},{value=3,label="+/- 3 levels"},{value=5,label="+/- 5 levels"}},s.range,ManTechPB_LFGRangeChanged)
+    s.summary=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); s.summary:SetPoint("TOPLEFT",f,"TOPLEFT",348,-92); s.summary:SetWidth(485); s.summary:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(s.summary,12,"")
+    local i,h
+    local headers={{"#",20},{"ROLE",49},{"CLASS / STYLE",154},{"INCLUDE / KEEP",300},{"MEMBER / CANDIDATE",445},{"STATE",730}}
+    for i=1,table.getn(headers) do
+        h=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); h:SetPoint("TOPLEFT",f,"TOPLEFT",headers[i][2],-134); h:SetText(headers[i][1]); ManTechPB_SetReadableFont(h,11,"OUTLINE")
+    end
+    s.rows={}
+    for i=1,8 do
+        local row={}; s.rows[i]=row
+        local y=-157-(i-1)*38
+        row.label=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); row.label:SetPoint("TOPLEFT",f,"TOPLEFT",20,y-6); ManTechPB_SetReadableFont(row.label,12,"")
+        row.role=ManTechPB_CreateLFGDropdown(f,46,y,99,{{value="tank",label="Tank"},{value="heal",label="Healer"},{value="dps",label="DPS"}},"dps",ManTechPB_LFGRoleChanged)
+        row.dropdown=ManTechPB_CreateLFGDropdown(f,152,y,140,{{value="ANY",label="Any DPS"}},"ANY",ManTechPB_LFGPreferenceDropdownChanged)
+        row.source=ManTechPB_CreateLFGDropdown(f,299,y,138,{{value="AUTO",label="Recruit bot"},{value="KEEP",label="Keep member"},{value="PREP",label="Prepare bot"}},"AUTO",ManTechPB_LFGSourceChanged)
+        if i>4 then
+            row.dropdown.menu:ClearAllPoints(); row.dropdown.menu:SetPoint("BOTTOMLEFT",row.dropdown,"TOPLEFT",0,1)
+        end
+        row.candidate=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); row.candidate:SetWidth(279); row.candidate:SetHeight(26); row.candidate:SetPoint("TOPLEFT",f,"TOPLEFT",444,y)
+        ManTechPB_StyleButton(row.candidate,12); row.candidate:SetScript("OnClick",ManTechPB_LFGCandidateClicked); row.candidate:SetScript("OnEnter",ManTechPB_LFGCandidateTooltip); row.candidate:SetScript("OnLeave",function() GameTooltip:Hide() end)
+        row.state=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); row.state:SetPoint("TOPLEFT",f,"TOPLEFT",731,y-6); row.state:SetWidth(107); row.state:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(row.state,11,"OUTLINE")
+    end
+    local prev=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); prev:SetWidth(80); prev:SetHeight(26); prev:SetPoint("TOPLEFT",f,"TOPLEFT",20,-468); prev:SetText("< Prev"); ManTechPB_StyleButton(prev,12); prev:SetScript("OnClick",function() ManTechPB_LFGPage(-1) end)
+    s.pageLabel=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); s.pageLabel:SetPoint("TOPLEFT",f,"TOPLEFT",118,-475); ManTechPB_SetReadableFont(s.pageLabel,12,"")
+    local nextButton=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); nextButton:SetWidth(80); nextButton:SetHeight(26); nextButton:SetPoint("TOPLEFT",f,"TOPLEFT",213,-468); nextButton:SetText("Next >"); ManTechPB_StyleButton(nextButton,12); nextButton:SetScript("OnClick",function() ManTechPB_LFGPage(1) end)
+    local search=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); s.searchButton=search; search:SetWidth(145); search:SetHeight(30); search:SetPoint("TOPLEFT",f,"TOPLEFT",20,-508); search:SetText("Preview /who"); ManTechPB_StyleButton(search,12); search:SetScript("OnClick",function() ManTechPB_LFGStartSearch() end)
+    local build=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); s.buildButton=build; build:SetWidth(180); build:SetHeight(30); build:SetPoint("LEFT",search,"RIGHT",12,0); build:SetText("Build / Resume"); ManTechPB_StyleButton(build,12); build:SetScript("OnClick",ManTechPB_LFGBuildGroup)
+    local reset=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); s.resetButton=reset; reset:SetWidth(140); reset:SetHeight(30); reset:SetPoint("LEFT",build,"RIGHT",12,0); reset:SetText("Clear search"); ManTechPB_StyleButton(reset,12); reset:SetScript("OnClick",ManTechPB_LFGReset)
+    s.status=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); s.status:SetPoint("TOPLEFT",f,"TOPLEFT",20,-551); s.status:SetWidth(818); s.status:SetHeight(53); s.status:SetJustifyH("LEFT"); s.status:SetJustifyV("TOP"); ManTechPB_SetReadableFont(s.status,12,"")
+    f:Hide(); ManTechPB_LFGSyncMembers(); ManTechPB_LFGRefreshRows()
+    ManTechPB_LFGSetStatus("Confirm kept members' roles. Core pre-invite replies are still required; unavailable support is reported, not bypassed.",MTPB_COLORS.yellow)
 end
 
 function ManTechPB_ShowLFG()
-    ManTechPB_CreateLFGFrame(); ManTechPB_LFG.frame:Show(); ManTechPB_LFGRefreshRows()
+    ManTechPB_CreateLFGFrame(); ManTechPB_LFGSyncMembers()
+    ManTechPB_LFG.frame:Show(); ManTechPB_LFGRefreshRows()
 end
 
 local function MTPB_CreateTalentFrame()
@@ -3845,6 +4176,7 @@ MTPB_EVENTS:SetScript("OnEvent", function(self, eventName, a1, a2, a3, a4)
         if p1 == "BOT" then MTPB_ParseTalentReply(p2, p4); MTPB_ParseStrategies(p2, p4) end
         if MTPB_FRAME then MTPB_UpdateCards() end
     elseif currentEvent == "PARTY_MEMBERS_CHANGED" or currentEvent == "RAID_ROSTER_UPDATE" then
+        ManTechPB_LFGOnRosterChanged()
         -- Roster changes can fire several times while logging in or reloading.
         -- Refresh the local UI only; query settings when the user opens the
         -- manager, selects a bot, or presses Refresh.

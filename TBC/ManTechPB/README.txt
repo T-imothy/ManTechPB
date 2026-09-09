@@ -1,4 +1,4 @@
-ManTechPB 0.7.1
+ManTechPB 0.8.0
 
 ManTechPB is a standalone CMaNGOS PlayerBots manager. It does not require the
 Mangosbot addon and does not overwrite it.
@@ -26,7 +26,7 @@ Design goals:
 - title-bar controls use separate click and drag regions on every supported client
 - Healer DPS reads and changes combat-only offdps strategies without requiring a nonexistent non-combat copy
 - separate Group Builder window opened by LFG or /mtp lfg
-- five-role composition editor with one player role and four bot slots
+- paged 5/10/20/25/40-slot plans, explicit roles and protected existing members
 - per-slot tank, healer, DPS class/style preferences and selectable level range
 - one-click, paced /who discovery with bot-response checks before invitations
 - automatic server talent-build selection, role sync, gearing, supplies, tank pull/assist, and healer-DPS-off defaults
@@ -45,41 +45,47 @@ manager's own background command traffic is hidden.
 
 GROUP BUILDER
 -------------
-Open LFG or /mtp lfg. Choose your own role, four class/style preferences and
-a level range. Click Build Group once. It searches, verifies bot replies, invites,
-confirms talents and settings, then generates gear and adds supplies in sequence.
-No manual invites are needed. At level 43 with +/-2, Warrior searches use
-/who c-"Warrior" 41-45. Results display here; the Blizzard Who window need not open.
+Open LFG or /mtp lfg. Select Party (5) or Raid (10/20/25/40).
+Use the pages to assign roles and class/style preferences. Existing members default
+to Keep member. Confirm each new member's role dropdown before building; this
+reserves a slot and NEVER changes their character. Choose Prepare bot explicitly
+to include an existing bot. Your character is always kept unchanged.
 
-Search /who is an optional preview. Empty rows search that role; named rows cycle
-candidates. Build Group searches afresh and honors manually cycled names if still
-available. Queries are spaced at least eight seconds apart, retry once on timeout,
-and stop on missing replies. Avoid manual /who and other Who-search addons while
-building: the legacy protocol has no request IDs.
+Build / Resume fills the vacancies first, then summons included bots, waits for
+ALL included bots to arrive, and only then changes talents/settings and requests
+gear/supplies. Selecting a raid size authorizes conversion to raid when needed.
+The addon never disbands groups, kicks members, moves subgroups or summons humans.
+Lead your group and stay outside combat, battlegrounds and arenas.
 
-Who results are not proof of bot identity. The builder requests the normal bot
-"who" response before inviting; nonresponders and bots reporting another master
-are skipped, with at most 24 checks per run. Busy bots may be skipped. This is
-protocol recognition, not authenticated discovery.
+Tank gets Tank Assist, Pull and Pull Back. Healer gets a healing preset and Healer
+DPS OFF. Supported AoE, cooldowns, buffs, cleansing, food/drink and potions are
+enabled, using class-specific strategies where needed.
 
-The selected server talent build must match the assigned role and confirm before
-role changes. Gear follows confirmed settings. Food, potions, consumes, reagents
-and ammo each wait for their server acknowledgement. Tank gets Tank Assist,
-Pull and Pull Back. Healer gets a healing preset and Healer DPS OFF. Supported
-AoE, cooldowns, buffs, cleansing, food/drink and potions are enabled. Death Knight
-controls use class-specific strategies. READY means all stages were confirmed.
+Summon uses the server's existing command and rules. Arrival requires the bot to
+be online, alive, noncombat, visible and within follow-interaction distance.
+Two summon requests over 45 seconds are allowed; unresolved combat/death/loading
+or denied destinations STOP preparation. Sending a summon is not arrival.
 
-Start solo or lead a compatible partial bot party outside combat, raids and BGs.
-One slot is you; the other four must be bots. Existing members must fit the choices
-and answer as available bots; nobody is kicked automatically. The server must
-allow talent/gear/supply commands. The addon cannot bypass these permissions,
-create missing talent presets or guarantee unlimited inventory/equipment.
+Invite failures try another candidate, with one bounded replacement search.
+Unexpected joins/departures stop for roster/role review. Existing humans remain
+protected and take precedence over a stale recruitment plan.
 
-Refusals and timeouts STOP further setup with an explanation. Cancel discards
-unsent steps, but does not remove joined bots or undo completed changes. Closing
-this window does not cancel. A new Build Group repeats setup, including random
-gear. Other addon commands are paused during the run to avoid conflicts.
-The builder does not summon bots to the dungeon.
+Cancel discards unsent steps without undoing completed changes. Build / Resume
+keeps confirmed gear/supply checkpoints for the same bot, role and build in this
+UI session. Changing a role or explicitly choosing Prepare bot again clears that
+slot's checkpoint. Reload/logout loses checkpoints; a lost server acknowledgement
+still needs a future idempotent core protocol. Closing the window does not cancel.
+
+IMPORTANT: Legacy /who cannot prove bot identity. This release still needs the
+core task to resolve the pre-invite bot "who" reply-permission problem or provide
+a defined replacement protocol. It never invites arbitrary unverified humans as
+a workaround. Summon and prep permissions cannot be bypassed by an addon.
+
+Preview /who is optional. Empty rows search their class/role. Queries deduplicate
+classes across slots, wait at least eight seconds apart, retry a timeout once,
+and have bounded replacement/probe budgets. Avoid simultaneous manual /who or
+other Who-search addons: legacy responses have no request IDs or bot identity.
+Core-wide scaling and authoritative reservations remain separate core work.
 
 Select one bot and open Setup > Talents. ManTechPB asks that bot for the exact
 predefined builds configured on the current server; it never invents a cross-version

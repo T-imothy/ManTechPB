@@ -9,7 +9,7 @@ local methods = {}
 function methods:RegisterEvent(name) self.events = self.events or {}; self.events[name] = true end
 function methods:SetScript(name, fn) self.scripts = self.scripts or {}; self.scripts[name] = fn end
 function methods:GetScript(name) return self.scripts and self.scripts[name] end
-function methods:Show() self.visible = true; if self.scripts and self.scripts.OnShow then self.scripts.OnShow(self) end end
+function methods:Show() self.visible = true; if type(self.scripts)=="table" and self.scripts.OnShow then self.scripts.OnShow(self) end end
 function methods:Hide() self.visible = false end
 function methods:IsVisible() return self.visible == true end
 function methods:SetWidth(value) self.width = value end
@@ -111,8 +111,9 @@ end
 
 
 -- Standalone deterministic Group Builder integration harness; no game/server writes.
-local pending,party,trace,invites,behaviors={}, {}, {}, {}, {}
+local pending,party,trace,invites,behaviors,nearby={}, {}, {}, {}, {}, {}
 local scenario={}
+local raidActive=false
 local candidates={
     WARRIOR={{name="Humanwar",class="WARRIOR",level=43},{name="Tankbot",class="WARRIOR",level=43}},
     PRIEST={{name="Healbot",class="PRIEST",level=43}},
@@ -126,20 +127,30 @@ local function emit(event,a,b)
 end
 local function later(fn) table.insert(pending,{time=GetTime()+0.1,fn=fn}) end
 function GetNumPartyMembers() return table.getn(party) end
-function GetNumRaidMembers() return scenario.raid and 5 or 0 end
+function GetNumRaidMembers() return raidActive and table.getn(party)+1 or (scenario.raid and 5 or 0) end
+function IsRaidLeader() return not scenario.notLeader end
+function ConvertToRaid() table.insert(trace,{kind="convert",time=GetTime()}); raidActive=true end
+function IsInInstance() return scenario.bg and true or false,scenario.bg and "pvp" or "none" end
 function IsPartyLeader() return not scenario.notLeader end
 function UnitAffectingCombat() return scenario.combat end
 function UnitLevel() return 43 end
 function UnitName(unit)
     if unit=="player" then return "Tester" end
+    local _,_,raidIndex=string.find(unit,"^raid(%d+)$")
+    if raidIndex then if tonumber(raidIndex)==1 then return "Tester" end; return party[tonumber(raidIndex)-1] end
     local _,_,n=string.find(unit,"^party(%d+)$")
     if n then return party[tonumber(n)] end
 end
 local function classFor(name)
+    if name=="Humanone" or name=="Humantwo" then return "PRIEST" end
     for class,list in pairs(candidates) do for _,c in ipairs(list) do if c.name==name then return class end end end
 end
 function UnitClass(unit) local c=classFor(UnitName(unit)); return ManTechPB_LFGClassLabels[c],c end
 function UnitExists(unit) return UnitName(unit)~=nil end
+function UnitIsVisible(unit) return nearby[UnitName(unit)]==true end
+function CheckInteractDistance(unit) return nearby[UnitName(unit)]==true end
+function UnitIsConnected() return true end
+function UnitIsDeadOrGhost() return scenario.dead end
 function SetWhoToUI(value) scenario.whoToUI=value end
 function GetNumWhoResults() return table.getn(whoResults) end
 function GetWhoInfo(i)
@@ -158,23 +169,34 @@ function SendWho(query)
 end
 function InviteByName(name)
     table.insert(invites,name); table.insert(trace,{kind="invite",name=name,time=GetTime()})
-    if scenario.noJoin then return end
+    if scenario.noJoin or (scenario.refuseName and scenario.refuseName==name) then return end
     table.insert(party,name)
 end
 local builds={WARRIOR="pve prot",PRIEST="pve holy",MAGE="pve frost",ROGUE="pve combat"}
+local function chosenBuild(name)
+    local slot=ManTechPB_LFG.slots[ManTechPB_LFG.slotIndex]
+    local class=classFor(name)
+    if slot.role=="dps" and class=="WARRIOR" then return "pve fury" end
+    if slot.role=="dps" and class=="PRIEST" then return "pve shadow" end
+    return builds[class]
+end
 local function command(text,name)
     table.insert(trace,{kind="command",name=name,text=text,time=GetTime()})
     text=string.gsub(text,"^BOT\t","")
     if text=="who" then
         if name=="Humanwar" or scenario.noBotReply then return end
         later(function() emit("CHAT_MSG_WHISPER","|h|cffffffffProtection Warrior (|h|cff00ff0043|h|cffffffff lvl), |h|cff00ff00120|h|cffffffff GS (1/2)|r",name) end)
+    elseif text=="summon" then
+        if scenario.noArrival then return end
+        later(function() nearby[name]=true end)
     elseif text=="talents list" then
         if scenario.noBuilds then return end
-        local build=builds[classFor(name)]
+        local build=chosenBuild(name)
         later(function() emit("CHAT_MSG_PARTY",build.." (0/0/41).",name) end)
     elseif string.sub(text,1,8)=="talents " or text=="talents" then
         if scenario.rejectTalents then return end
-        later(function() emit("CHAT_MSG_WHISPER","My current talent spec is: "..builds[classFor(name)].." (0/0/41) Link: 000",name) end)
+        local build=chosenBuild(name)
+        later(function() emit("CHAT_MSG_WHISPER","My current talent spec is: "..build.." (0/0/41) Link: 000",name) end)
     elseif string.sub(text,1,3)=="#a " then
         local _,_,context,ops=string.find(text,"^#a (%a+) (.+)$")
         behaviors[name]=behaviors[name] or {co={offdps=true,["offdps raid"]=true},nc={},react={},de={}}
@@ -198,6 +220,7 @@ local function command(text,name)
         if not action then return end
         local result=({gear="random gear equipped",food="food added",potions="potions added",consumes="consumables added",reagents="reagents added",ammo="ok"})[action]
         if scenario.rejectGear and action=="gear" then result="Not your bot" end
+        if scenario.rejectFood and action=="food" then result="Not your bot" end
         if scenario.noSupplyReply then return end
         later(function() emit("CHAT_MSG_SYSTEM",action..": "..bot.." - "..result) end)
     end
@@ -224,7 +247,10 @@ end
 local function reset(options)
     ManTechPB_LFGReset()
     ManTechPB_LFGReset()
-    scenario=options or {}; party={}; pending={}; trace={}; invites={}; behaviors={}
+    scenario=options or {}; party={}; pending={}; trace={}; invites={}; behaviors={}; nearby={}; raidActive=false
+    ManTechPB_LFG.rosterAt=nil
+    ManTechPB_LFG.slots=nil; ManTechPB_LFG.size=nil; ManTechPB_LFG.page=1
+    ManTechPB_LFGInitialize()
     ManTechPB_LFG.slots[1].preference="WARRIOR"
     ManTechPB_LFG.slots[2].preference="PRIEST"
     ManTechPB_LFG.slots[3].preference="MAGE"
@@ -268,6 +294,28 @@ assert(not behaviors.Healbot.co.offdps and not behaviors.Healbot.co["offdps raid
 assert(behaviors.Healbot.co.holy and behaviors.Healbot.nc.food and behaviors.Healbot.react.potions and behaviors.Healbot.co.aoe and behaviors.Healbot.co.boost and behaviors.Healbot.co.buff,"healer defaults missing")
 assert(behaviors.Tankbot.co["tank assist"] and behaviors.Tankbot.co.pull,"tank defaults missing")
 assert(not contains(".bot prepare"),"broad preparation command used")
+local lastInvite=0
+for _,t in ipairs(trace) do if t.kind=="invite" then lastInvite=t.time end end
+local lastSummon=0
+for _,t in ipairs(trace) do
+    if t.text=="summon" then assert(t.time>=lastInvite,"summoned before all invitations joined"); lastSummon=t.time end
+    if t.text=="talents list" then assert(t.time>=lastSummon and table.getn(party)==4,"prep started before group arrival") end
+end
+local doneCommands=table.getn(trace)
+ManTechPB_LFGBuildGroup(); run()
+for i=doneCommands+1,table.getn(trace) do assert(not string.find(trace[i].text or "",".bot gear",1,true),"resume rerolled completed gear") end
+
+reset({noArrival=true})
+ManTechPB_LFGBuildGroup(); run()
+assert(contains("summon") and not contains("talents list") and not contains(".bot gear"),"unconfirmed arrival allowed prep")
+
+reset({dead=true})
+ManTechPB_LFGBuildGroup(); run()
+assert(not contains("talents list"),"dead bot was treated as ready")
+
+reset({bg=true})
+ManTechPB_LFGBuildGroup(); run()
+assert(table.getn(trace)==0,"BG build allowed")
 
 reset({rejectTalents=true})
 ManTechPB_LFGBuildGroup(); run()
@@ -290,6 +338,14 @@ assert(contains(".bot gear") and not contains(".bot food"),"gear refusal did not
 reset({noSupplyReply=true})
 ManTechPB_LFGBuildGroup(); run()
 assert(not contains(".bot food"),"missing gear ack advanced the workflow")
+
+reset({rejectFood=true})
+ManTechPB_LFGBuildGroup(); run()
+assert(contains(".bot gear Tankbot"),"partial prep fixture never geared tank")
+scenario.rejectFood=false
+local checkpoint=table.getn(trace)
+ManTechPB_LFGBuildGroup(); run()
+for i=checkpoint+1,table.getn(trace) do assert(trace[i].text~=".bot gear Tankbot","partial resume repeated confirmed gear") end
 
 reset({whoTimeout=true})
 ManTechPB_LFGBuildGroup(); run()
@@ -327,6 +383,8 @@ assert(not ManTechPB_LFG.building and table.getn(trace)==0,"combat build allowed
 -- Existing known party member stays in the group and is never re-invited.
 reset()
 party={"Tankbot"}
+ManTechPB_LFGSyncMembers()
+ManTechPB_LFGSourceChanged("PREP",{slotIndex=1})
 ManTechPB_LFGBuildGroup(); run()
 assert(table.getn(party)==4 and table.getn(invites)==3,"existing-party fill failed")
 for _,name in ipairs(invites) do assert(name~="Tankbot","existing member re-invited") end
@@ -334,3 +392,68 @@ for _,name in ipairs(invites) do assert(name~="Tankbot","existing member re-invi
 local ranged=ManTechPB_LFGFindBuild({role="dps",preference="RANGED"},{class="DRUID",talentBuilds={{name="pve dps feral"}}})
 assert(not ranged,"ranged preference silently selected melee")
 print("Group Builder integration passed: preview, automatic build, bot verification, defaults, pacing, refusal, timeouts, cancellation, existing party, raid/combat guards.")
+
+-- A failed invitation is replaced without removing anyone from a group.
+reset({refuseName="Tankbot"})
+table.insert(candidates.WARRIOR,{name="Ztank",class="WARRIOR",level=43})
+ManTechPB_LFGBuildGroup(); run()
+assert(ManTechPB_LFGMember("Ztank") and not ManTechPB_LFGMember("Tankbot"),"declined invitation did not try an alternative")
+table.remove(candidates.WARRIOR,table.getn(candidates.WARRIOR))
+
+-- Preserve humans and require an explicit role assignment.
+reset()
+party={"Humanone"}
+ManTechPB_LFGSyncMembers()
+ManTechPB_LFGBuildGroup()
+assert(not ManTechPB_LFG.building and table.getn(trace)==0,"unreviewed human role was guessed")
+ManTechPB_LFGRoleChanged("tank",{slotIndex=1})
+ManTechPB_LFGBuildGroup(); run()
+for _,t in ipairs(trace) do assert(t.name~="Humanone" and not string.find(t.text or "",".bot gear Humanone",1,true),"human member was changed") end
+assert(table.getn(party)==4,"mixed party did not fill vacancies")
+
+reset()
+ManTechPB_LFGBuildGroup()
+while ManTechPB_LFG.searching do step() end
+table.insert(party,"Humanone")
+emit("PARTY_MEMBERS_CHANGED")
+assert(not ManTechPB_LFG.building,"unexpected human join did not pause recruitment")
+
+-- Full 40-slot mixed raid with paged controls and bounded class queries.
+reset()
+ManTechPB_LFGSetSize(40)
+assert(ManTechPB_LFG.size==40 and table.getn(ManTechPB_LFG.rows)==8,"raid UI is not paged")
+ManTechPB_LFGPage(4)
+assert(ManTechPB_LFG.rows[8].role.slotIndex==40,"last raid slot not editable")
+party={"Humanone","Humantwo"}
+raidActive=true
+ManTechPB_LFGSyncMembers()
+ManTechPB_LFGRoleChanged("tank",{slotIndex=1})
+ManTechPB_LFGRoleChanged("heal",{slotIndex=2})
+local originalCandidates=candidates
+candidates={WARRIOR={},PRIEST={},MAGE={},ROGUE={}}
+for i=1,20 do
+    table.insert(candidates.MAGE,{name="Raidmage"..string.char(64+i),class="MAGE",level=43})
+    table.insert(candidates.ROGUE,{name="Raidrogue"..string.char(64+i),class="ROGUE",level=43})
+end
+for i=3,40 do if i~=5 then ManTechPB_LFG.slots[i].preference=(i<=22 and "MAGE" or "ROGUE") end end
+ManTechPB_LFGBuildGroup(); run()
+assert(table.getn(party)==39 and table.getn(invites)==37,"mixed 40-player raid did not fill exactly 37 bot vacancies")
+local queries=0
+for _,t in ipairs(trace) do
+    if t.kind=="who" then queries=queries+1 end
+    assert(t.name~="Humanone" and t.name~="Humantwo","raid human received a bot command")
+end
+assert(queries==2,"raid searched per slot instead of deduplicating classes")
+for i=1,40 do if i~=1 and i~=2 and i~=5 then assert(ManTechPB_LFG.slots[i].state=="READY","raid slot not ready: "..i) end end
+candidates=originalCandidates
+reset()
+ManTechPB_LFGSetSize(10)
+ManTechPB_LFG.playerSlot="TANK"
+local savedMages=candidates.MAGE
+candidates.MAGE={}
+for i=1,8 do table.insert(candidates.MAGE,{name="Tenmage"..string.char(64+i),class="MAGE",level=43}) end
+for i=3,10 do ManTechPB_LFG.slots[i].preference="MAGE" end
+ManTechPB_LFGBuildGroup(); run()
+assert(raidActive and table.getn(party)==9,"solo-to-raid conversion did not fill ten slots")
+candidates.MAGE=savedMages
+print("Mixed raid/summon tests passed: arrival barrier, dead/refused summons, resume, human protection, invite replacement, 40 slots, 37 bots, two class queries.")
