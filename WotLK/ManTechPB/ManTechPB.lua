@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.6.18"
+local MTPB_VERSION = "0.6.19"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -577,7 +577,7 @@ end
 local MTPB_HELP_PAGES = {
     OVERVIEW = {
         title="Manager overview",
-        text="|cffe3b95bChoose the scope first.|r  Party affects every controlled party bot. Selecting a name on the left limits supported actions to that bot. My Alts lists known account bots outside the current party.\n\n|cff4dd7ffPlay|r has common orders. |cff4dd7ffSetup|r pairs the real talent build with an AI role. |cff4dd7ffCombat|r changes fighting behavior. |cff4dd7ffWorld|r controls movement, formation, and looting. |cff4dd7ffExpert|r contains the complete advanced controls.\n\nGreen borders mean confirmed ON, no border means OFF, gold means pending, and a half-state means a mixed party selection. Read the bottom status line after every change."
+        text="|cffe3b95bChoose the scope first.|r  Party affects every controlled party bot. Selecting a name on the left limits supported actions to that bot. My Alts lists known account bots outside the current party. Select an offline alt and use Log In, or select an online bot and use Log Out. All In and All Out affect the full known account-bot roster.\n\n|cff4dd7ffPlay|r has common orders. |cff4dd7ffSetup|r pairs the real talent build with an AI role. |cff4dd7ffCombat|r changes fighting behavior. |cff4dd7ffWorld|r controls movement, formation, and looting. |cff4dd7ffExpert|r contains the complete advanced controls.\n\nGreen borders mean confirmed ON, no border means OFF, gold means pending, and a half-state means a mixed party selection. Read the bottom status line after every change."
     },
     INDIVIDUAL = {
         title="Individual control",
@@ -2011,6 +2011,57 @@ local function MTPB_BotCsv()
     return table.concat(names, ",")
 end
 
+function ManTechPB_UpdateSessionButtons()
+    local data = MTPB_SELECTED and MTPB_BOTS[MTPB_SELECTED]
+    if ManTechPBLoginButton then
+        if data and data.online == false then ManTechPBLoginButton:Enable()
+        else ManTechPBLoginButton:Disable() end
+    end
+    if ManTechPBLogoutButton then
+        if data and data.online ~= false then ManTechPBLogoutButton:Enable()
+        else ManTechPBLogoutButton:Disable() end
+    end
+    local hasBots = table.getn(MTPB_AllBotNames()) > 0
+    if ManTechPBLoginAllButton then
+        if hasBots then ManTechPBLoginAllButton:Enable() else ManTechPBLoginAllButton:Disable() end
+    end
+    if ManTechPBLogoutAllButton then
+        if hasBots then ManTechPBLogoutAllButton:Enable() else ManTechPBLogoutAllButton:Disable() end
+    end
+end
+
+function ManTechPB_ShowSessionTooltip(button)
+    local owner = button or this
+    if not owner or not owner.mtpbSessionTip then return end
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    GameTooltip:SetText(owner:GetText())
+    GameTooltip:AddLine(owner.mtpbSessionTip, 1, 1, 1, true)
+    GameTooltip:Show()
+end
+
+function ManTechPB_SetSelectedBotOnline(online)
+    if not MTPB_SELECTED then
+        MTPB_SetStatus("Choose one bot under Party or My Alts first.", MTPB_COLORS.red)
+        return
+    end
+    local action = online and "add " or "rm "
+    MTPB_SendRawCommand(".bot " .. action .. MTPB_SELECTED, "SAY")
+    MTPB_SetStatus((online and "Logging in " or "Logging out ") .. MTPB_SELECTED .. "...", MTPB_COLORS.yellow)
+    MTPB_UpdateBotList(0.8)
+end
+
+function ManTechPB_SetAllBotsOnline(online)
+    local csv = MTPB_BotCsv()
+    if csv == "" then
+        MTPB_SetStatus("No account bots are known yet. Click Refresh first.", MTPB_COLORS.red)
+        return
+    end
+    local action = online and "add " or "rm "
+    MTPB_SendRawCommand(".bot " .. action .. csv, "SAY")
+    MTPB_SetStatus(online and "Logging in all known account bots..." or "Logging out all known account bots...", MTPB_COLORS.yellow)
+    MTPB_UpdateBotList(0.8)
+end
+
 local function MTPB_OpenWhisper()
     if not MTPB_SELECTED then MTPB_SetStatus("Choose one bot first.", MTPB_COLORS.red); return end
     local editBox = getglobal and getglobal("ChatFrameEditBox")
@@ -2247,6 +2298,7 @@ local function MTPB_Select(name, querySettings)
     end
     MTPB_SetStatus(name and ("Controlling " .. name .. ".") or "Controlling the entire bot party.", MTPB_COLORS.gray)
     MTPB_UpdateCards()
+    ManTechPB_UpdateSessionButtons()
     if MTPB_TALENT_FRAME and MTPB_TALENT_FRAME:IsVisible() then MTPB_RefreshTalentWindow() end
 end
 
@@ -2276,6 +2328,7 @@ local function MTPB_UpdateRoster()
     for name, button in pairs(MTPB_ROSTER_FILTER_BUTTONS) do
         if name == MTPB_ROSTER_VIEW then button:LockHighlight() else button:UnlockHighlight() end
     end
+    ManTechPB_UpdateSessionButtons()
     if MTPB_SELECTED and (not MTPB_BOTS or not MTPB_BOTS[MTPB_SELECTED]) then MTPB_Select(nil) end
 end
 
@@ -2326,7 +2379,7 @@ local function MTPB_CreateFrame()
     if MTPB_FRAME then return end
     local f = CreateFrame("Frame", "ManTechPBFrame", UIParent)
     MTPB_FRAME = f
-    f:SetWidth(558); f:SetHeight(408); f:SetScale(1.06)
+    f:SetWidth(558); f:SetHeight(452); f:SetScale(1.06)
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true); f:EnableMouse(true)
     f:SetClampedToScreen(true)
@@ -2386,7 +2439,7 @@ local function MTPB_CreateFrame()
 
     local sidebar = CreateFrame("Frame", nil, f)
     sidebar:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -64)
-    sidebar:SetWidth(142); sidebar:SetHeight(305)
+    sidebar:SetWidth(142); sidebar:SetHeight(349)
     sidebar:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background", edgeFile="Interface\\Tooltips\\UI-Tooltip-Border", tile=true, tileSize=16, edgeSize=10, insets={left=3,right=3,top=3,bottom=3}})
     sidebar:SetBackdropColor(0.02, 0.04, 0.065, 0.96)
     sidebar:SetBackdropBorderColor(0.12, 0.36, 0.50, 0.9)
@@ -2423,6 +2476,27 @@ local function MTPB_CreateFrame()
     MTPB_ROSTER_TEXT:SetTextColor(0.55, 0.63, 0.72)
     ManTechPB_SetReadableFont(MTPB_ROSTER_TEXT, 11, "")
 
+    local login = CreateFrame("Button", "ManTechPBLoginButton", sidebar, "UIPanelButtonTemplate")
+    login:SetWidth(61); login:SetHeight(22); login:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 8, -272); login:SetText("Log In")
+    ManTechPB_StyleButton(login, 11); login:SetScript("OnClick", function() ManTechPB_SetSelectedBotOnline(true) end)
+    login.mtpbSessionTip = "Log in the selected offline bot. Choose it from My Alts first."
+    login:SetScript("OnEnter", ManTechPB_ShowSessionTooltip); login:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    local logout = CreateFrame("Button", "ManTechPBLogoutButton", sidebar, "UIPanelButtonTemplate")
+    logout:SetWidth(61); logout:SetHeight(22); logout:SetPoint("TOPRIGHT", sidebar, "TOPRIGHT", -8, -272); logout:SetText("Log Out")
+    ManTechPB_StyleButton(logout, 11); logout:SetScript("OnClick", function() ManTechPB_SetSelectedBotOnline(false) end)
+    logout.mtpbSessionTip = "Log out the selected online bot."
+    logout:SetScript("OnEnter", ManTechPB_ShowSessionTooltip); logout:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    local loginAll = CreateFrame("Button", "ManTechPBLoginAllButton", sidebar, "UIPanelButtonTemplate")
+    loginAll:SetWidth(61); loginAll:SetHeight(22); loginAll:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 8, -298); loginAll:SetText("All In")
+    ManTechPB_StyleButton(loginAll, 11); loginAll:SetScript("OnClick", function() ManTechPB_SetAllBotsOnline(true) end)
+    loginAll.mtpbSessionTip = "Log in every bot listed by this account's bot roster."
+    loginAll:SetScript("OnEnter", ManTechPB_ShowSessionTooltip); loginAll:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    local logoutAll = CreateFrame("Button", "ManTechPBLogoutAllButton", sidebar, "UIPanelButtonTemplate")
+    logoutAll:SetWidth(61); logoutAll:SetHeight(22); logoutAll:SetPoint("TOPRIGHT", sidebar, "TOPRIGHT", -8, -298); logoutAll:SetText("All Out")
+    ManTechPB_StyleButton(logoutAll, 11); logoutAll:SetScript("OnClick", function() ManTechPB_SetAllBotsOnline(false) end)
+    logoutAll.mtpbSessionTip = "Log out every bot listed by this account's bot roster."
+    logoutAll:SetScript("OnEnter", ManTechPB_ShowSessionTooltip); logoutAll:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     local tabNames = {{"HOME","Play"},{"SETUP","Setup"},{"COMBAT","Combat"},{"WORLD","World"},{"EXPERT","Expert"}}
     local i, key, label, tab
     for i = 1, table.getn(tabNames) do
@@ -2440,7 +2514,7 @@ local function MTPB_CreateFrame()
 
     local content = CreateFrame("Frame", nil, f)
     content:SetPoint("TOPLEFT", f, "TOPLEFT", 164, -92)
-    content:SetWidth(380); content:SetHeight(277)
+    content:SetWidth(380); content:SetHeight(321)
     local names = {"HOME","SETUP","COMBAT","WORLD","EXPERT"}
     for i = 1, table.getn(names) do
         local panel = CreateFrame("Frame", nil, content)

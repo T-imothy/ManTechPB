@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.6.18 |
-| The Burning Crusade | 20400 | 0.6.18-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.6.18-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.6.19 |
+| The Burning Crusade | 20400 | 0.6.19-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.6.19-WotLK.1 |
 
 ## Installation
 

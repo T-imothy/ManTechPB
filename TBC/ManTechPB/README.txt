@@ -1,4 +1,4 @@
-ManTechPB 0.6.18
+ManTechPB 0.6.19
 
 ManTechPB is a standalone CMaNGOS PlayerBots manager. It does not require the
 Mangosbot addon and does not overwrite it.
@@ -8,6 +8,7 @@ Design goals:
 - Play, Setup, Combat, World, and Expert tabs
 - Party or individual-bot scope is always visible
 - Party and My Alts sidebar filters keep grouped bots separate from account alts
+- always-visible selected-bot and all-account-bot login/logout controls
 - selected-bot scope is saved per character and stale cross-character selections are never auto-contacted
 - class-aware AI role/spec setup with mutually exclusive roles
 - plain-English labels, descriptions, tooltips, and command feedback
