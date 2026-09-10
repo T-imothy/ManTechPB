@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.11.1 |
-| The Burning Crusade | 20400 | 0.11.1-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.11.1-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.12.0 |
+| The Burning Crusade | 20400 | 0.12.0-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.12.0-WotLK.1 |
 
 ## Installation
 
@@ -21,6 +21,16 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 Open the manager with `/mtp`, `/mantechpb`, or the minimap button. Each version folder also contains a detailed `README.txt`.
 
 ## Group / Raid Builder
+
+### New in 0.12.0: organized, higher-contrast builder
+
+The builder has a compact party layout, opaque dark background, brighter readable
+text, aligned roster rows and a dedicated destination section. Build / Resume is
+the primary action; **Options** groups Protocol, Preview search and PvP fallback.
+No functionality is removed. Search, unlock refresh, cooldown, Min/Max, exact builds,
+Keep/Prepare, Cancel/Clear, Instructions and Help remain available. Raid paging
+appears only when needed and keeps a stable layout through all 40 slots. Hover the
+status area to read the full diagnostic. Bot behavior and automation are unchanged.
 
 ### New in 0.11.1: dungeon/raid search
 

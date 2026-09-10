@@ -225,6 +225,7 @@ function T.paint()
     end
     if T.searchCount then T.searchCount:SetText(matches==0 and "No matching dungeons or raids. Clear search to see all." or (matches.." destinations - choose a result below")) end
     T.dropdown.value=T.destination; ManTechPB_LFGSetMenu(T.dropdown,choices)
+    if T.styleDropdown then T.styleDropdown(T.dropdown) end
     T.dropdown:SetText(ManTechPB_LFGDropdownText(T.dropdown))
     local d=known[T.destination]
     if d then
@@ -272,6 +273,7 @@ function ManTechPB_LFGRefreshRows()
         if busy then T.dropdown:Disable(); T.refreshButton:Disable(); T.maximum:EnableMouse(false)
         else T.dropdown:Enable(); T.refreshButton:Enable(); T.maximum:EnableMouse(true) end
         T.levelPaint(); T.paint()
+        if T.layoutReady then T.layout() end
     end
 end
 function ManTechPB_CreateLFGFrame()
@@ -327,6 +329,7 @@ function ManTechPB_CreateLFGFrame()
     for _,item in ipairs({{text="Min",x=190},{text="Max",x=264}}) do
         local label=f:CreateFontString(nil,"OVERLAY","GameFontNormal")
         label:SetPoint("TOPLEFT",f,"TOPLEFT",item.x,-97); label:SetText(item.text); ManTechPB_SetReadableFont(label,12,"")
+        if item.text=="Min" then T.minimumLabel=label else T.maximumLabel=label end
     end
     T.minimum=f:CreateFontString(nil,"OVERLAY","GameFontNormal")
     T.minimum:SetPoint("TOPLEFT",f,"TOPLEFT",223,-97); ManTechPB_SetReadableFont(T.minimum,13,"")
@@ -338,6 +341,142 @@ function ManTechPB_CreateLFGFrame()
     T.maximum:SetScript("OnEnterPressed",function() T.maximum:ClearFocus() end)
     T.maximum:SetScript("OnEscapePressed",function() T.editing=nil; T.levelPaint(); T.maximum:ClearFocus() end)
     T.levelPaint(); T.paint(); T.refreshWanted=true
+    T.createLayout(); T.layout()
+end
+-- Builder-only visual layout. Reuses the existing controls and callbacks;
+-- no recruitment, travel, ownership or preparation decisions live here.
+function T.place(region,x,y,width,height)
+    region:ClearAllPoints(); region:SetPoint("TOPLEFT",ManTechPB_LFG.frame,"TOPLEFT",x,-y)
+    if width then region:SetWidth(width) end
+    if height then region:SetHeight(height) end
+end
+function T.textStyle(region,size,secondary)
+    region:SetFont("Fonts\\ARIALN.TTF",size,"")
+    if secondary then region:SetTextColor(0.85,0.90,0.97) else region:SetTextColor(1,0.94,0.62) end
+end
+function T.uiButton(button,primary)
+    local label=button:GetFontString()
+    if label then T.textStyle(label,13,false) end
+    if T.normalFont then
+        button:SetNormalFontObject(T.normalFont); button:SetHighlightFontObject(T.normalFont)
+        button:SetDisabledFontObject(T.disabledFont)
+    end
+    -- Keep the existing bevel/shine and pressed feedback, but remove the stock
+    -- grey disabled slab. Disabled choices remain legible, not interactive.
+    button:SetDisabledTexture("")
+    button:SetBackdropColor(primary and 0.12 or 0.07,primary and 0.32 or 0.16,primary and 0.43 or 0.23,1)
+    button:SetBackdropBorderColor(primary and 0.50 or 0.27,primary and 0.85 or 0.46,primary and 1 or 0.60,1)
+    local normal=button:GetNormalTexture()
+    if normal then normal:SetVertexColor(primary and 0.16 or 0.10,primary and 0.37 or 0.22,primary and 0.49 or 0.31,1) end
+end
+function T.styleDropdown(dropdown)
+    T.uiButton(dropdown)
+    for _,button in ipairs(dropdown.options or {}) do T.uiButton(button) end
+    if dropdown.pageControlsCreated==true then T.uiButton(dropdown.pagePrevious); T.uiButton(dropdown.pageNext) end
+end
+function T.createLayout()
+    if T.layoutReady then return end
+    local s=ManTechPB_LFG; local f=s.frame
+    T.canvas=f:CreateTexture(nil,"BACKGROUND"); T.canvas:SetTexture(0.025,0.037,0.057,0.98)
+    T.canvas:SetPoint("TOPLEFT",f,"TOPLEFT",8,-8); T.canvas:SetPoint("BOTTOMRIGHT",f,"BOTTOMRIGHT",-8,8)
+    T.groupPanel=f:CreateTexture(nil,"BACKGROUND"); T.groupPanel:SetTexture(0.05,0.08,0.12,1)
+    T.travelPanel=f:CreateTexture(nil,"BACKGROUND"); T.travelPanel:SetTexture(0.05,0.08,0.12,1)
+    T.stripes={}
+    for i=1,8 do
+        local stripe=f:CreateTexture(nil,"BACKGROUND"); stripe:SetTexture(0.07,0.105,0.15,i/2==math.floor(i/2) and 0.75 or 0.35)
+        T.stripes[i]=stripe
+    end
+    if CreateFont then
+        T.normalFont=CreateFont("ManTechPBBuilderBrightFont"); T.textStyle(T.normalFont,13,false)
+        T.disabledFont=CreateFont("ManTechPBBuilderDisabledFont"); T.disabledFont:SetFont("Fonts\\ARIALN.TTF",13,""); T.disabledFont:SetTextColor(0.75,0.81,0.88)
+    end
+    T.optionsButton=CreateFrame("Button",nil,f,"UIPanelButtonTemplate")
+    ManTechPB_StyleButton(T.optionsButton,13)
+    T.optionsButton:SetScript("OnClick",function()
+        ManTechPB_LFGCloseDropdown(); T.optionsOpen=not T.optionsOpen; T.layout()
+    end)
+    T.optionNote=f:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    T.optionNote:SetText("Preview only searches. Protocol and PvP fallback are optional; the standard settings work for most groups.")
+    T.destinationHeading=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); T.destinationHeading:SetText("DESTINATION")
+    T.actionHint=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); T.actionHint:SetText("Teleport (optional)  >  Recruit  >  Summon  >  Prepare")
+    T.statusHover=CreateFrame("Button",nil,f)
+    T.statusHover:SetScript("OnEnter",function()
+        GameTooltip:SetOwner(T.statusHover,"ANCHOR_TOP"); GameTooltip:AddLine("Group Builder status")
+        GameTooltip:AddLine(s.statusMessage or "",1,1,1,true); GameTooltip:Show()
+    end)
+    T.statusHover:SetScript("OnLeave",function() GameTooltip:Hide() end)
+    T.layoutReady=true
+end
+function T.layout()
+    if not T.layoutReady then return end
+    local s=ManTechPB_LFG; local extra=T.optionsOpen and 68 or 0
+    local count=math.min(8,s.size)
+    local rowStart=150+extra; local rowBottom=rowStart+count*34
+    local paged=s.size>8; local travelTop=rowBottom+(paged and 44 or 12)
+    local actions=travelTop+116; local height=actions+96
+    s.frame:SetWidth(940); s.frame:SetHeight(height)
+    if UIParent.GetWidth and UIParent.GetHeight then
+        local width,screenHeight=UIParent:GetWidth(),UIParent:GetHeight()
+        if type(width)=="number" and type(screenHeight)=="number" and width>400 and screenHeight>300 then
+            s.frame:SetScale(math.min(1,(width-24)/940,(screenHeight-24)/height))
+        end
+    end
+    T.place(s.title,20,18,500,22); T.textStyle(s.title,17,false)
+    s.title:SetText("GROUP / RAID BUILDER")
+    T.place(s.intro,20,47,900,18); T.textStyle(s.intro,13,true)
+    s.intro:SetText("Choose your group and destination, then Build / Resume. Keep members are left unchanged.")
+    T.place(T.groupPanel,16,71,908,42+extra)
+    T.place(s.sizeDropdown,26,78,166,28); T.styleDropdown(s.sizeDropdown)
+    T.place(T.minimumLabel,214,85,29,18); T.place(T.minimum,249,85,28,18)
+    T.place(T.maximumLabel,287,85,31,18); T.place(T.maximum,327,78,42,28)
+    T.textStyle(T.minimumLabel,13,true); T.textStyle(T.maximumLabel,13,true); T.textStyle(T.minimum,14,false); T.textStyle(T.maximum,14,true)
+    T.place(s.summary,390,80,406,30); T.textStyle(s.summary,12,true)
+    T.place(T.optionsButton,814,78,100,28); T.optionsButton:SetText(T.optionsOpen and "Options -" or "Options +"); T.uiButton(T.optionsButton)
+    if T.optionsOpen then
+        T.place(s.buildPolicy,26,121,223,28); s.buildPolicy:Show(); T.styleDropdown(s.buildPolicy)
+        T.place(s.protocolButton,264,121,242,28); s.protocolButton:Show(); T.uiButton(s.protocolButton)
+        T.place(s.searchButton,522,121,163,28); s.searchButton:Show(); T.uiButton(s.searchButton)
+        T.place(T.optionNote,26,157,875,18); T.textStyle(T.optionNote,12,true); T.optionNote:Show()
+    else s.buildPolicy:Hide(); s.protocolButton:Hide(); s.searchButton:Hide(); T.optionNote:Hide() end
+    local columns={{"#",24},{"ROLE",44},{"CLASS",136},{"BUILD / SPEC",259},{"ACTION",461},{"MEMBER / CANDIDATE",586},{"STATUS",818}}
+    for i,column in ipairs(columns) do
+        local header=s.columnHeaders[i]; T.place(header,column[2],128+extra,nil,18); header:SetText(column[1]); T.textStyle(header,12,true)
+    end
+    for i,row in ipairs(s.rows) do
+        local y=rowStart+(i-1)*34
+        T.place(T.stripes[i],20,y-2,902,32)
+        if s.slots[(s.page-1)*8+i] then T.stripes[i]:Show() else T.stripes[i]:Hide() end
+        T.place(row.label,25,y+6,17,18); T.textStyle(row.label,12,true)
+        T.place(row.role,40,y,84,28); T.styleDropdown(row.role)
+        T.place(row.dropdown,132,y,115,28); T.styleDropdown(row.dropdown)
+        T.place(row.spec,255,y,194,28); T.styleDropdown(row.spec)
+        T.place(row.source,457,y,117,28); T.styleDropdown(row.source)
+        T.place(row.candidate,582,y,223,28); T.uiButton(row.candidate)
+        T.place(row.state,814,y+6,105,19); T.textStyle(row.state,12,false)
+        local slot=s.slots[(s.page-1)*8+i]
+        if slot then
+            if ManTechPB_LFGReserved(slot) then row.state:SetTextColor(0.68,0.84,1)
+            elseif slot.state=="READY" then row.state:SetTextColor(0.50,1,0.64)
+            elseif slot.state=="STOPPED" then row.state:SetTextColor(1,0.58,0.52) end
+        end
+    end
+    for _,control in ipairs({s.previousPageButton,s.pageLabel,s.nextPageButton}) do if paged then control:Show() else control:Hide() end end
+    T.place(s.previousPageButton,20,rowBottom+5,90,26); T.uiButton(s.previousPageButton)
+    T.place(s.pageLabel,126,rowBottom+11,110,18); T.textStyle(s.pageLabel,12,true)
+    T.place(s.nextPageButton,240,rowBottom+5,90,26); T.uiButton(s.nextPageButton)
+    T.place(T.travelPanel,16,travelTop,908,108)
+    T.place(T.destinationHeading,28,travelTop+10,180,18); T.textStyle(T.destinationHeading,12,true)
+    T.place(T.cooldownLabel,465,travelTop+10,447,18); T.textStyle(T.cooldownLabel,12,true)
+    T.place(T.dropdown,28,travelTop+34,694,30); T.styleDropdown(T.dropdown)
+    T.place(T.refreshButton,738,travelTop+34,174,30); T.uiButton(T.refreshButton)
+    T.place(T.notice,28,travelTop+74,874,30); T.textStyle(T.notice,12,true)
+    T.place(T.actionHint,24,actions+10,508,20); T.textStyle(T.actionHint,12,true)
+    T.place(s.resetButton,554,actions,150,34); T.uiButton(s.resetButton)
+    T.place(s.buildButton,720,actions,196,34); T.uiButton(s.buildButton,true)
+    T.place(s.status,24,actions+48,890,40); T.textStyle(s.status,13,true)
+    T.place(T.statusHover,20,actions+43,900,47)
+    T.uiButton(s.helpButton); T.uiButton(s.instructionsButton)
+    T.uiButton(T.searchClear); T.textStyle(T.searchCount,12,true); T.textStyle(T.searchBox,13,true)
 end
 function T.event(name,level)
     if name=="PLAYER_ENTERING_WORLD" then T.schedule()

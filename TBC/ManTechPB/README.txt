@@ -1,4 +1,13 @@
-ManTechPB 0.11.1
+ManTechPB 0.12.0
+
+0.12.0: Reorganized Group/Raid Builder. Compact party layout, opaque background,
+brighter readable text, aligned roster rows and a grouped destination section.
+Build / Resume is the primary action. Options contains the existing protocol,
+Preview search and PvP fallback controls; nothing was removed. Raid pagination
+appears only for multiple pages, with stable layout through all 40 slots.
+Search, discovery, cooldown, Min/Max, exact builds, Keep/Prepare, Cancel/Clear,
+Instructions and Help remain available. Hover the status area for full details.
+This is a builder-only visual update: bot settings and automation are unchanged.
 
 0.11.1: Open the dungeon dropdown and type in Search to filter dungeons/raids
 by name or canonical key. Words match without case or punctuation sensitivity;

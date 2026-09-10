@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.11.1"
+local MTPB_VERSION = "0.12.0"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -2508,6 +2508,7 @@ function ManTechPB_CreateLFGDropdown(parent, x, y, width, values, selected, chan
 end
 
 function ManTechPB_LFGSetStatus(text, color)
+    ManTechPB_LFG.statusMessage=text; ManTechPB_LFG.statusColor=color
     if ManTechPB_LFG.status then ManTechPB_LFG.status:SetText((color or MTPB_COLORS.gray) .. text .. "|r") end
 end
 
@@ -3482,6 +3483,7 @@ function ManTechPB_CreateLFGFrame()
     instructions:SetWidth(104); instructions:SetHeight(24); instructions:SetPoint("TOPRIGHT",f,"TOPRIGHT",-92,-10); instructions:SetText("Instructions")
     ManTechPB_StyleButton(instructions,12); instructions:SetScript("OnClick",function() ManTechPB_ShowLFGInstructions(1) end)
     local intro=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); intro:SetPoint("TOPLEFT",f,"TOPLEFT",20,-47); intro:SetWidth(958); intro:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(intro,12,"")
+    s.title=title; s.intro=intro; s.helpButton=help; s.instructionsButton=instructions
     intro:SetText("Set composition, levels and optional dungeon -> Build / Resume. Teleport -> recruit -> summon -> prep. Keep members stay unchanged. Raid size authorizes conversion.")
     s.sizeDropdown=ManTechPB_CreateLFGDropdown(f,20,-91,156,{{value=5,label="Party (5)"},{value=10,label="Raid (10)"},{value=20,label="Raid (20)"},{value=25,label="Raid (25)"},{value=40,label="Raid (40)"}},s.size,ManTechPB_LFGSetSize)
     s.rangeDropdown=ManTechPB_CreateLFGDropdown(f,190,-91,142,{{value=0,label="Exact level"},{value=1,label="+/- 1 level"},{value=2,label="+/- 2 levels"},{value=3,label="+/- 3 levels"},{value=5,label="+/- 5 levels"}},s.range,ManTechPB_LFGRangeChanged)
@@ -3489,8 +3491,10 @@ function ManTechPB_CreateLFGFrame()
     s.summary=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); s.summary:SetPoint("TOPLEFT",f,"TOPLEFT",510,-92); s.summary:SetWidth(468); s.summary:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(s.summary,12,"")
     local i,h
     local headers={{"#",20},{"ROLE",49},{"CLASS / STYLE",154},{"SPEC",298},{"INCLUDE / KEEP",442},{"MEMBER / CANDIDATE",575},{"STATE",870}}
+    s.columnHeaders={}
     for i=1,table.getn(headers) do
         h=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); h:SetPoint("TOPLEFT",f,"TOPLEFT",headers[i][2],-134); h:SetText(headers[i][1]); ManTechPB_SetReadableFont(h,11,"OUTLINE")
+        s.columnHeaders[i]=h
     end
     s.rows={}
     for i=1,8 do
@@ -3514,6 +3518,7 @@ function ManTechPB_CreateLFGFrame()
     local prev=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); prev:SetWidth(80); prev:SetHeight(26); prev:SetPoint("TOPLEFT",f,"TOPLEFT",20,-468); prev:SetText("< Prev"); ManTechPB_StyleButton(prev,12); prev:SetScript("OnClick",function() ManTechPB_LFGPage(-1) end)
     s.pageLabel=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); s.pageLabel:SetPoint("TOPLEFT",f,"TOPLEFT",118,-475); ManTechPB_SetReadableFont(s.pageLabel,12,"")
     local nextButton=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); nextButton:SetWidth(80); nextButton:SetHeight(26); nextButton:SetPoint("TOPLEFT",f,"TOPLEFT",213,-468); nextButton:SetText("Next >"); ManTechPB_StyleButton(nextButton,12); nextButton:SetScript("OnClick",function() ManTechPB_LFGPage(1) end)
+    s.previousPageButton=prev; s.nextPageButton=nextButton
     local search=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); s.searchButton=search; search:SetWidth(145); search:SetHeight(30); search:SetPoint("TOPLEFT",f,"TOPLEFT",20,-508); search:SetText("Preview /who"); ManTechPB_StyleButton(search,12); search:SetScript("OnClick",function() ManTechPB_LFGStartSearch() end)
     local build=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); s.buildButton=build; build:SetWidth(180); build:SetHeight(30); build:SetPoint("LEFT",search,"RIGHT",12,0); build:SetText("Build / Resume"); ManTechPB_StyleButton(build,12); build:SetScript("OnClick",ManTechPB_LFGBuildGroup)
     local reset=CreateFrame("Button",nil,f,"UIPanelButtonTemplate"); s.resetButton=reset; reset:SetWidth(140); reset:SetHeight(30); reset:SetPoint("LEFT",build,"RIGHT",12,0); reset:SetText("Clear search"); ManTechPB_StyleButton(reset,12); reset:SetScript("OnClick",ManTechPB_LFGReset)

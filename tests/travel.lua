@@ -183,4 +183,42 @@ assert(string.find(T.cooldownText(),"unknown",1,true),"expired estimate did not 
 reply("Travelling to Uldaman.")
 assert(string.find(T.cooldownText(),"5:00",1,true),"manual teleport success did not start estimate")
 time=oldTime
+-- Layout only: compact party, expandable options, stable raid pages, unchanged controls.
+T.optionsOpen=false; T.layout()
+assert(s.frame:GetWidth()==940 and s.frame:GetHeight()<620,"party layout did not reduce empty space")
+assert(not s.previousPageButton:IsVisible() and not s.nextPageButton:IsVisible(),"single-page party shows redundant pagination")
+assert(not s.protocolButton:IsVisible() and not s.searchButton:IsVisible() and not s.buildPolicy:IsVisible(),"secondary controls not grouped under Options")
+local roleBefore=s.slots[1].role
+local searchCallback=s.searchButton.scripts.OnClick
+local builderCallback=s.buildButton.scripts.OnClick
+local wiresBefore=table.getn(wire)
+T.optionsButton.scripts.OnClick()
+assert(s.protocolButton:IsVisible() and s.searchButton:IsVisible() and s.buildPolicy:IsVisible(),"Options removed existing controls")
+assert(s.searchButton.scripts.OnClick==searchCallback and s.buildButton.scripts.OnClick==builderCallback,"layout replaced workflow callbacks")
+assert(s.slots[1].role==roleBefore and table.getn(wire)==wiresBefore,"Options changed composition or sent commands")
+local function bounds(control)
+    local x,y=control.pointArgs[4],-control.pointArgs[5]
+    assert(x>=0 and y>=0 and x+control:GetWidth()<=940 and y+control:GetHeight()<=s.frame:GetHeight(),"control exceeds builder bounds")
+end
+for _,control in ipairs({T.dropdown,T.refreshButton,T.maximum,s.buildButton,s.resetButton,s.status,T.notice,s.protocolButton,s.buildPolicy}) do bounds(control) end
+for _,row in ipairs(s.rows) do
+    assert(row.role.pointArgs[4]+row.role:GetWidth()<row.dropdown.pointArgs[4],"role/class overlap")
+    assert(row.spec.pointArgs[4]+row.spec:GetWidth()<row.source.pointArgs[4],"build/action overlap")
+    assert(row.candidate.pointArgs[4]+row.candidate:GetWidth()<row.state.pointArgs[4],"member/state overlap")
+end
+T.optionsButton.scripts.OnClick()
+local oldSlots,oldSize,oldPage=s.slots,s.size,s.page
+local raidSlots={}
+for i=1,40 do raidSlots[i]={key="ROW"..i,role="dps",preference="ANY",spec="AUTO"} end
+s.slots=raidSlots; s.size=40; s.page=1
+ManTechPB_LFGRefreshRows(); local raidHeight=s.frame:GetHeight()
+assert(s.previousPageButton:IsVisible() and s.nextPageButton:IsVisible(),"raid paging disappeared")
+s.page=5; ManTechPB_LFGRefreshRows()
+assert(s.frame:GetHeight()==raidHeight,"raid paging shifts the entire window")
+s.building=true; ManTechPB_LFGRefreshRows()
+assert(s.resetButton:GetText()=="Cancel" and s.buildButton.enabled==false,"busy/cancel behavior lost")
+s.building=nil; s.slots=oldSlots; s.size=oldSize; s.page=oldPage; ManTechPB_LFGRefreshRows()
+ManTechPB_LFGSetStatus("Full diagnostic remains available on hover")
+assert(s.statusMessage=="Full diagnostic remains available on hover" and T.statusHover.scripts.OnEnter,"full status details removed")
+print("Builder layout tests passed: compact party, options access, bright-control reuse, no overlap, stable 40-player paging and no workflow mutations.")
 print("Travel tests passed: expansion inventories, atomic discovery, throttle, chat filtering, locked gating, one-shot go, confirmed arrival, cancel, timeout, leader changes and dynamic level bounds.")
