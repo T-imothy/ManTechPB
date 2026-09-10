@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.11.0 |
-| The Burning Crusade | 20400 | 0.11.0-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.11.0-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.11.1 |
+| The Burning Crusade | 20400 | 0.11.1-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.11.1-WotLK.1 |
 
 ## Installation
 
@@ -21,6 +21,18 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 Open the manager with `/mtp`, `/mantechpb`, or the minimap button. Each version folder also contains a detailed `README.txt`.
 
 ## Group / Raid Builder
+
+### New in 0.11.1: dungeon/raid search
+
+Open the destination dropdown and type in **Search**. Names and canonical keys
+are filtered as you type, ignoring case and punctuation (for example `scarlet lib`
+or `ahn qiraj`). Clear restores all destinations. Lock status remains visible;
+filtering never changes the selected destination or sends server requests.
+
+A cooldown display above the selector counts down an **estimated** five minutes
+after observed addon/manual travel and survives reloads per character. The current
+core reports only `cooldown`, not seconds remaining. Unobserved cooldowns therefore
+show unknown; timer expiry does not claim server eligibility or bypass its checks.
 
 ### New in 0.11.0: discovered dungeon travel, before recruitment
 

@@ -54,6 +54,24 @@ local function snapshot(state)
 end
 reset(); ManTechPB_CreateLFGFrame()
 assert(T.dropdown.pageSize==8 and not s.rangeDropdown:IsVisible(),"destination paging or level controls missing")
+local searchWireCount=table.getn(wire)
+T.dropdown.menuPage=4; T.searchBox:SetText("  SCARLET lib  "); T.searchChanged()
+assert(table.getn(T.dropdown.values)==2 and T.dropdown.values[2].value=="scarlet_library","search not filtering words case-insensitively")
+assert(T.dropdown.menuPage==1 and T.destination=="NONE","search selected travel or retained stale page")
+assert(T.dropdown.options[1].pointArgs[5]==-57,"search header overlaps first result")
+T.destination="uldaman"; T.paint()
+assert(string.find(T.dropdown:GetText(),"Uldaman",1,true),"filter hid selected destination label")
+T.searchBox:SetText("no_such_dungeon"); T.searchChanged()
+assert(table.getn(T.dropdown.values)==1 and string.find(T.searchCount:GetText(),"No matching",1,true),"empty search lacks explanation")
+assert(T.destination=="uldaman","zero matches replaced selection")
+T.searchClear.scripts.OnClick()
+assert(table.getn(T.dropdown.values)==expected+1,"clear did not restore full inventory")
+assert(table.getn(wire)==searchWireCount,"local search sent server commands")
+T.searchBox:SetText("ahn qiraj"); T.searchChanged()
+assert(table.getn(T.dropdown.values)==3,"punctuation-separated raid search failed")
+T.searchBox:SetText("scarlet_library"); T.searchChanged()
+assert(table.getn(T.dropdown.values)==2,"canonical key search failed")
+T.searchClear.scripts.OnClick(); T.destination="NONE"; T.paint()
 T.refreshWanted=nil
 local id=snapshot("locked")
 assert(T.valid and T.snapshot.uldaman=="locked","complete locked snapshot not committed")
@@ -143,4 +161,26 @@ s.maxRecruitLevel=minimum; local a,b=ManTechPB_LFGLevelBounds(); assert(a==b,"ma
 local kept={role="dps",preference="ANY",keepName="Human"}
 assert(ManTechPB_LFGReserved(kept),"level checks altered keep ownership")
 T.event("PLAYER_ENTERING_WORLD"); assert(not T.valid and T.refreshWanted,"instance entry guessed an unlock locally")
+local oldTime=time
+local wall=200000
+function time() return wall end
+R.db().travelCooldowns={}
+T.startCooldown()
+assert(string.find(T.cooldownText(),"5:00 (estimated)",1,true),"accepted teleport lacks estimated timer")
+wall=wall+61
+assert(string.find(T.cooldownText(),"3:59",1,true),"cooldown does not count down")
+T.cooldownUnknown()
+assert(string.find(T.cooldownText(),"3:59",1,true),"cooldown refusal reset a known timer")
+T.lastCooldownText=nil; T.cooldownPaint()
+assert(string.find(T.cooldownLabel:GetText(),"3:59",1,true),"persisted timer did not redraw")
+local identity=T.identity; T.identity="different-character"
+assert(not string.find(T.cooldownText(),"3:59",1,true),"cooldown leaked across characters")
+T.cooldownUnknown(); assert(string.find(T.cooldownText(),"unknown",1,true),"unknown cooldown fabricated remaining seconds")
+T.identity=identity; wall=wall+240
+assert(string.find(T.cooldownText(),"estimate elapsed",1,true),"timer expiry promised server eligibility")
+reply("Travel denied: cooldown.")
+assert(string.find(T.cooldownText(),"unknown",1,true),"expired estimate did not defer to server refusal")
+reply("Travelling to Uldaman.")
+assert(string.find(T.cooldownText(),"5:00",1,true),"manual teleport success did not start estimate")
+time=oldTime
 print("Travel tests passed: expansion inventories, atomic discovery, throttle, chat filtering, locked gating, one-shot go, confirmed arrival, cancel, timeout, leader changes and dynamic level bounds.")

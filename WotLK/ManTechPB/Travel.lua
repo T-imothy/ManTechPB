@@ -38,8 +38,51 @@ function T.send(id,operation,key)
     local command=".tp v1 "..id.." "..operation.." "..key
     local record=T.issued[id] or {commands={}}
     record.commands[command]=true; record.expires=GetTime()+180
+    if operation=="go" and not record.goKey then
+        record.goKey=key; record.goAt=time and time() or nil; record.identity=T.identity
+    end
     T.issued[id]=record
     SendChatMessage(command,"SAY")
+end
+function T.cooldownRecord()
+    local db=R.db(); db.travelCooldowns=db.travelCooldowns or {}
+    local key=T.identity or ManTechPB_LFGPlanKey()
+    return key and db.travelCooldowns[key],key,db.travelCooldowns
+end
+function T.startCooldown(started,identity)
+    local _,key,records=T.cooldownRecord()
+    if not key or (identity and identity~=key) or not time then return end
+    -- Current deployment is 300 seconds. PBTP v1 sends no configured duration or
+    -- remaining seconds: this is display-only, never an eligibility decision.
+    records[key]={expires=(started or time())+300,estimated=true}
+    T.cooldownPaint()
+end
+function T.cooldownUnknown()
+    local record,key,records=T.cooldownRecord()
+    if key and (type(record)~="table" or type(record.expires)~="number" or not time or record.expires<=time()) then
+        records[key]={unknown=true}
+    end
+    T.cooldownPaint()
+end
+function T.cooldownText()
+    local record=T.cooldownRecord()
+    if type(record)=="table" then
+        if record.unknown then return "Teleport cooldown: remaining time unknown" end
+        if type(record.expires)=="number" and time then
+            local remaining=math.max(0,math.ceil(record.expires-time()))
+            if remaining>0 and remaining<=300 then
+                return "Teleport cooldown: "..math.floor(remaining/60)..":"..string.format("%02d",math.mod(remaining,60)).." (estimated)"
+            end
+            return "Teleport estimate elapsed - server checks eligibility"
+        end
+    end
+    return "Teleport cooldown: checked by server when building"
+end
+function T.cooldownPaint()
+    if T.cooldownLabel then
+        local label=T.cooldownText()
+        if T.lastCooldownText~=label then T.cooldownLabel:SetText(label); T.lastCooldownText=label end
+    end
 end
 function R.hideWireChat(eventName,message,sender)
     if not R.db().debugWire then
@@ -104,6 +147,7 @@ function T.beforeBuild()
     end
     if T.snapshot[T.destination]~="unlocked" then T.status(T.lockedText); return false end
     if table.getn(R.cancels)>0 then T.status("Wait for pending recruitment cancellations before travelling."); return false end
+    ManTechPB_LFGCloseDropdown()
     local s=ManTechPB_LFG
     T.active={id=R.id(),key=T.destination,phase="check",untilAt=GetTime()+60,identity=T.identity}
     s.building=true; s.stage="travel"; s.slotIndex=nil
@@ -120,6 +164,12 @@ end
 function T.travelReply(text)
     local _,_,id,key,state,reason=string.find(text,"^PBTP 1 ([%w_%-]+) ([%w_%-]+) ([%w_%-]+) ([%w_%-]+)$")
     if not id then return end
+    local receipt=T.issued[id]
+    if receipt and receipt.expires>=GetTime() and receipt.goKey==key and not receipt.cooldownSeen and
+        ((state=="pending" and reason=="transfer") or (state=="arrived" and reason=="ok")) then
+        receipt.cooldownSeen=true
+        T.startCooldown(receipt.goAt,receipt.identity)
+    end
     if T.request and id==T.request.id and key=="all" and (state=="denied" or state=="unsupported") then
         T.catalogFailed(T.reason(reason)); return
     end
@@ -127,6 +177,7 @@ function T.travelReply(text)
     if not a or a.id~=id or a.key~=key or a.identity~=T.identity then return end
     if not ManTechPB_LFGLeader() or T.destination~=a.key then ManTechPB_LFGStop("Travel stopped: leader or destination changed."); return end
     if state=="denied" or state=="unsupported" then
+        if reason=="cooldown" then T.cooldownUnknown() end
         if reason=="undiscovered" then T.snapshot[key]="locked" end
         local message=T.reason(reason); ManTechPB_LFGStop(message); T.status(message); return
     end
@@ -145,6 +196,8 @@ function T.travelReply(text)
 end
 function ManTechPB_LFGSystemReply(message)
     local text=R.clean(message)
+    if string.find(text,"^Travelling to .+%.$") then T.startCooldown()
+    elseif text=="Travel denied: cooldown." then T.cooldownUnknown() end
     if string.find(text,"^PBTPU ") then T.snapshotReply(text)
     elseif string.find(text,"^PBTP ") then T.travelReply(text)
     else T.base.system(message) end
@@ -160,10 +213,17 @@ function T.paint()
     if not T.dropdown then return end
     local list,known=T.catalog()
     local choices={{value="NONE",label="No teleport - build here"}}
+    local matches=0
+    T.dropdown.selectedLabel="No teleport - build here"
     for _,d in ipairs(list) do
         local suffix=not T.valid and " [Unchecked]" or (T.snapshot[d.key]=="unlocked" and " [Unlocked]" or " [Locked]")
-        table.insert(choices,{value=d.key,label=d.label..suffix})
+        if d.key==T.destination then T.dropdown.selectedLabel=d.label..suffix end
+        if T.matchesSearch(d,T.searchText or "") then
+            matches=matches+1
+            table.insert(choices,{value=d.key,label=d.label..suffix})
+        end
     end
+    if T.searchCount then T.searchCount:SetText(matches==0 and "No matching dungeons or raids. Clear search to see all." or (matches.." destinations - choose a result below")) end
     T.dropdown.value=T.destination; ManTechPB_LFGSetMenu(T.dropdown,choices)
     T.dropdown:SetText(ManTechPB_LFGDropdownText(T.dropdown))
     local d=known[T.destination]
@@ -171,6 +231,21 @@ function T.paint()
         local state=not T.valid and "Discovery not verified. Refresh to check." or (T.snapshot[d.key]=="unlocked" and "Unlocked for this character; travel eligibility is checked at Build." or T.lockedText)
         T.notice:SetText(state.." "..d.note)
     else T.notice:SetText("Optional: select a dungeon. Teleport -> recruit -> summon -> prep. Keep members stay unchanged.") end
+end
+function T.matchesSearch(destination,query)
+    local words=string.lower(string.gsub(query,"[^%w]+"," "))
+    local haystack=string.lower(string.gsub(destination.label.." "..destination.key,"[^%w]+"," "))
+    for word in string.gfind(words,"%S+") do
+        if not string.find(haystack,word,1,true) then return false end
+    end
+    return true
+end
+function T.searchChanged()
+    if ManTechPB_LFG.building or ManTechPB_LFG.searching then return end
+    T.searchText=T.searchBox:GetText() or ""
+    T.dropdown.menuPage=1
+    -- Filtering is local only: no selection, unlock request or travel command.
+    T.paint()
 end
 function T.maxChanged()
     local s=ManTechPB_LFG
@@ -206,7 +281,28 @@ function ManTechPB_CreateLFGFrame()
     -- Use the existing spare bottom band; retain all eight raid rows and pagination.
     T.dropdown=ManTechPB_CreateLFGDropdown(f,320,-468,465,{{value="NONE",label="No teleport - build here"}},T.destination,T.select)
     T.dropdown.pageSize=8; T.dropdown.menuWidth=465
+    T.dropdown.menuHeaderHeight=54
     T.dropdown.menu:ClearAllPoints(); T.dropdown.menu:SetPoint("BOTTOMLEFT",T.dropdown,"TOPLEFT",0,1)
+    local searchLabel=T.dropdown.menu:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    searchLabel:SetPoint("TOPLEFT",T.dropdown.menu,"TOPLEFT",8,-13); searchLabel:SetText("Search"); ManTechPB_SetReadableFont(searchLabel,12,"")
+    T.searchBox=CreateFrame("EditBox","ManTechPBDungeonSearch",T.dropdown.menu,"InputBoxTemplate")
+    T.searchBox:SetPoint("TOPLEFT",T.dropdown.menu,"TOPLEFT",65,-7); T.searchBox:SetWidth(304); T.searchBox:SetHeight(24)
+    T.searchBox:SetAutoFocus(false); T.searchBox:SetMaxLetters(80); ManTechPB_SetReadableFont(T.searchBox,12,"")
+    T.searchBox:SetScript("OnTextChanged",T.searchChanged)
+    T.searchBox:SetScript("OnEnterPressed",function() T.searchBox:ClearFocus() end)
+    T.searchBox:SetScript("OnEscapePressed",function() T.searchBox:ClearFocus(); ManTechPB_LFGCloseDropdown() end)
+    T.searchClear=CreateFrame("Button",nil,T.dropdown.menu,"UIPanelButtonTemplate")
+    T.searchClear:SetPoint("TOPLEFT",T.dropdown.menu,"TOPLEFT",382,-7); T.searchClear:SetWidth(74); T.searchClear:SetHeight(24)
+    T.searchClear:SetText("Clear"); ManTechPB_StyleButton(T.searchClear,12)
+    T.searchClear:SetScript("OnClick",function() T.searchBox:SetText(""); T.searchChanged(); T.searchBox:SetFocus() end)
+    T.searchCount=T.dropdown.menu:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    T.searchCount:SetPoint("TOPLEFT",T.dropdown.menu,"TOPLEFT",8,-35); T.searchCount:SetWidth(449); T.searchCount:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(T.searchCount,11,"")
+    T.dropdown.menu:SetScript("OnShow",function() T.searchBox:SetFocus() end)
+    T.dropdown.menu:SetScript("OnHide",function() T.searchBox:ClearFocus() end)
+    T.cooldownLabel=f:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    T.cooldownLabel:SetPoint("TOPLEFT",f,"TOPLEFT",605,-450); T.cooldownLabel:SetWidth(365)
+    T.cooldownLabel:SetJustifyH("RIGHT"); ManTechPB_SetReadableFont(T.cooldownLabel,11,"")
+    T.lastCooldownText=nil; T.cooldownPaint()
     T.dropdown:SetScript("OnEnter",function()
         GameTooltip:SetOwner(T.dropdown,"ANCHOR_TOP"); GameTooltip:AddLine("Dungeon teleport")
         GameTooltip:AddLine("Enter the actual dungeon once AFTER the core update to unlock it for this character.",1,1,1,true)
@@ -262,6 +358,7 @@ function T.update()
         if T.active then ManTechPB_LFGStop("Character changed; travel cancelled.") end
         T.identity=identity; T.request=nil; T.snapshot={}; T.valid=false; T.destination="NONE"; T.refreshWanted=true
     end
+    T.cooldownPaint()
     for id,record in pairs(T.issued) do if now>record.expires then T.issued[id]=nil end end
     local a=T.active
     if a then

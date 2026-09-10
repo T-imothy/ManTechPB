@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.11.0"
+local MTPB_VERSION = "0.11.1"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -2264,6 +2264,7 @@ function ManTechPB_LFGSetMenu(dropdown,values)
     local first=(dropdown.menuPage-1)*size
     local visible=math.min(size,total-first)
     local width=type(dropdown.menuWidth)=="number" and dropdown.menuWidth or dropdown:GetWidth()
+    local header=type(dropdown.menuHeaderHeight)=="number" and dropdown.menuHeaderHeight or 0
     dropdown.menu:SetWidth(width)
     local i,option
     for i=1,visible do
@@ -2275,11 +2276,12 @@ function ManTechPB_LFGSetMenu(dropdown,values)
             ManTechPB_StyleButton(option,11); option:SetScript("OnClick",ManTechPB_LFGSelectDropdown)
         end
         option:SetWidth(width-6)
+        option:ClearAllPoints(); option:SetPoint("TOPLEFT",dropdown.menu,"TOPLEFT",3,-header-3-(i-1)*22)
         option.value=values[first+i].value; option.label=values[first+i].label; option.dropdown=dropdown
         option:SetText(option.label); option:Show()
     end
     for i=visible+1,table.getn(dropdown.options) do dropdown.options[i]:Hide() end
-    dropdown.menu:SetHeight(visible*22+6+(pages>1 and 28 or 0))
+    dropdown.menu:SetHeight(header+visible*22+6+(pages>1 and 28 or 0))
     if paged and dropdown.pageControlsCreated~=true then
         local previous=CreateFrame("Button",nil,dropdown.menu,"UIPanelButtonTemplate")
         local nextPage=CreateFrame("Button",nil,dropdown.menu,"UIPanelButtonTemplate")
@@ -2293,8 +2295,8 @@ function ManTechPB_LFGSetMenu(dropdown,values)
     end
     if dropdown.pageControlsCreated==true then
         if pages>1 then
-            dropdown.pagePrevious:ClearAllPoints(); dropdown.pagePrevious:SetPoint("TOPLEFT",dropdown.menu,"TOPLEFT",4,-visible*22-4)
-            dropdown.pageNext:ClearAllPoints(); dropdown.pageNext:SetPoint("TOPRIGHT",dropdown.menu,"TOPRIGHT",-4,-visible*22-4)
+            dropdown.pagePrevious:ClearAllPoints(); dropdown.pagePrevious:SetPoint("TOPLEFT",dropdown.menu,"TOPLEFT",4,-header-visible*22-4)
+            dropdown.pageNext:ClearAllPoints(); dropdown.pageNext:SetPoint("TOPRIGHT",dropdown.menu,"TOPRIGHT",-4,-header-visible*22-4)
             dropdown.pageNext:SetText("Next >  "..dropdown.menuPage.."/"..pages)
             dropdown.pagePrevious:Show(); dropdown.pageNext:Show()
             if dropdown.menuPage>1 then dropdown.pagePrevious:Enable() else dropdown.pagePrevious:Disable() end
@@ -2446,6 +2448,7 @@ function ManTechPB_LFGBuildPolicyChanged(value)
 end
 
 function ManTechPB_LFGDropdownText(dropdown)
+    if type(dropdown.selectedLabel)=="string" then return dropdown.selectedLabel end
     if type(dropdown.pageSize)=="number" and type(dropdown.value)=="string" and string.sub(dropdown.value,1,6)=="BUILD:" then
         local name=string.sub(dropdown.value,7)
         if string.len(name)>20 then return string.sub(name,1,18).."..." end

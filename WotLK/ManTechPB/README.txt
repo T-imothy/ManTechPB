@@ -1,4 +1,17 @@
-ManTechPB 0.11.0
+ManTechPB 0.11.1
+
+0.11.1: Open the dungeon dropdown and type in Search to filter dungeons/raids
+by name or canonical key. Words match without case or punctuation sensitivity;
+for example scarlet lib or ahn qiraj. Clear restores the full list. Filtering
+never changes your selected destination or sends server requests. Lock status
+remains visible, and matching results retain the existing paged menu.
+
+A teleport cooldown estimate appears above the destination selector. It tracks
+the configured deployment's five-minute delay after an observed addon/manual
+teleport, persists per character across reloads, and does not restart on refusals.
+The core does not supply seconds remaining: this is explicitly ESTIMATED. An
+unobserved cooldown shows remaining time unknown; expiry does not promise travel
+eligibility. The normal server checks still decide whether teleport is allowed.
 
 0.11.0: Optional dungeon teleport BEFORE recruitment. Set group composition and
 Min/Max bot levels, select an unlocked dungeon, then Build / Resume. The server
