@@ -1,4 +1,23 @@
-ManTechPB 0.10.6
+ManTechPB 0.11.0
+
+0.11.0: Optional dungeon teleport BEFORE recruitment. Set group composition and
+Min/Max bot levels, select an unlocked dungeon, then Build / Resume. The server
+must confirm your arrival before bots are recruited, summoned and prepared.
+Keep members remain untouched. No teleport builds where you are.
+
+Dungeon discovery is server-owned and permanent PER CHARACTER. Enter the actual
+instance once AFTER the core update, not just the entrance. Earlier visits cannot
+be recovered. Shared-map wings unlock together. Locked or unchecked destinations
+cannot start travel; Refresh unlocks requests one list, at most every 10 seconds.
+Unlocked does not waive combat, cooldown, leadership or entry requirements.
+Requires PBTP/PBTPU v1 on the server; there is no GM teleport fallback.
+
+After confirmed arrival the destination resets to No teleport, so a preparation
+retry will not move you again. Cancel stops unsent work; an already-sent teleport
+may finish. Arrival notes identify inside/outside or shared-approach destinations.
+Minimum bot level follows your current level; Max is editable and defaults to
+your level +2, capped at 60/70/80. Level-up pauses active work for a safe Resume.
+These limits apply only to recruitment, not to removing kept members.
 
 0.10.6: Builder role/class/spec choices, size/range and PvP policy survive reloads,
 scoped by character, realm and client. Matching members return to their saved

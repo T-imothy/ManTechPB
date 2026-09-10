@@ -8,9 +8,9 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 
 | Client | Interface | Release |
 | --- | ---: | --- |
-| Vanilla / Classic | 11200 | 0.10.6 |
-| The Burning Crusade | 20400 | 0.10.6-TBC.1 |
-| Wrath of the Lich King | 30300 | 0.10.6-WotLK.1 |
+| Vanilla / Classic | 11200 | 0.11.0 |
+| The Burning Crusade | 20400 | 0.11.0-TBC.1 |
+| Wrath of the Lich King | 30300 | 0.11.0-WotLK.1 |
 
 ## Installation
 
@@ -21,6 +21,33 @@ This project is a modern standalone successor inspired by the original [Mangosbo
 Open the manager with `/mtp`, `/mantechpb`, or the minimap button. Each version folder also contains a detailed `README.txt`.
 
 ## Group / Raid Builder
+
+### New in 0.11.0: discovered dungeon travel, before recruitment
+
+Set your group composition and bot levels, select an **unlocked** dungeon, then
+click Build / Resume. The sequence is **teleport you → server-confirmed arrival →
+recruit missing bots → summon included bots → existing talents/settings/gear/supplies**.
+Choose No teleport to build where you are. Keep members and other humans remain untouched.
+
+The core must record this character entering the actual dungeon once **after the
+discovery update**. Earlier visits are not recoverable. Standing outside, achievements
+and lockouts do not unlock travel. Shared-map wings unlock together. The addon uses
+one complete server snapshot (32 Classic / 57 TBC / 80 Wrath destinations), never local
+guesses. Locked or unverified destinations cannot start travel. Refresh unlocks is
+limited to once per ten seconds; an incomplete reply never grants an unlock.
+
+PBTP/PBTPU v1 server support is required. Unlocked means discovered, not exempt from
+cooldown, combat, leadership or entry rules. Placement notes identify inside/outside
+or shared approaches. Only a matching server arrival receipt starts recruitment.
+After arrival the selector resets to No teleport so Resume does not teleport again.
+Cancel cannot undo a teleport already sent. No GM command or permission fallback.
+
+Minimum recruit level follows your current level without reloading; editable Max
+defaults to current level +2 and is capped at 60/70/80. Levelling pauses active work;
+Build / Resume uses the new limits. Kept members are never removed by these limits.
+
+Protocol and workflow tests use a simulated client/server; live in-game validation
+remains required, including destination placement and discovery on rank-0 characters.
 
 ### New in 0.10.6: saved choices and safe talent-name selection
 

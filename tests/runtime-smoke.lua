@@ -111,6 +111,8 @@ end
 
 dofile(arg[1] or "work/mantechpb/ManTechPB.lua")
 dofile((string.gsub(arg[1] or "work/mantechpb/ManTechPB.lua","ManTechPB.lua$","Recruitment.lua")))
+dofile((string.gsub(arg[1] or "work/mantechpb/ManTechPB.lua","ManTechPB.lua$","Destinations.lua")))
+dofile((string.gsub(arg[1] or "work/mantechpb/ManTechPB.lua","ManTechPB.lua$","Travel.lua")))
 ManTechPB_Recruit.db().mode="legacy"
 
 local presetExpectations = {

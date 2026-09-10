@@ -292,7 +292,7 @@ reset({badToken=true})
 ManTechPB_LFGCycleCandidate(1)
 assert(ManTechPB_LFG.searching,"empty row did not search")
 run()
-assert(table.getn(trace)==1 and trace[1].text=='c-"Warrior" 41-45',"row search did not restrict class and levels")
+assert(table.getn(trace)==1 and trace[1].text=='c-"Warrior" 43-45',"row search did not restrict class and levels")
 assert(ManTechPB_LFG.slots[1].candidate,"partial matching lost tank when other roles were empty")
 assert(table.getn(invites)==0,"preview search sent invitations")
 
@@ -957,3 +957,4 @@ assert(not ManTechPB_LFG.building and table.getn(invites)==1 and not next(mutati
 print("Roster-loading regression passed: Unknown/nil/localized names, sequential join gaps, timeout, unexpected human, held packets and cancellation.")
 print("Fast discovery/UI regression passed: four queries for four bots, reused cancelled candidates, fresh identity checks, scoped protocol chat filtering.")
 print("Core v1 tests passed: staged party, authoritative arrival, ID replay, rate limit, uncertainty journal, correlation, full-group race, and legacy identity outcomes.")
+MTPB_TEST_HOOKS.travelSetup=function() v1reset(); return run,step,function() return table.getn(invites) end end

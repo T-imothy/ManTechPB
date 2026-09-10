@@ -137,7 +137,7 @@ assert(ManTechPBLFGDragRegion.pointArgs[4]==-212,"drag region overlaps Instructi
 ManTechPBLFGInstructionsButton.scripts.OnClick()
 assert(ManTechPBLFGInstructions:IsVisible(),"Instructions did not open")
 local quick=ManTechPB_LFG.instructionBody:GetText()
-assert(string.find(quick,"1. Choose",1,true) and string.find(quick,"2. Click Build / Resume",1,true) and string.find(quick,"READY",1,true) and string.find(quick,"4. Go play!",1,true),"quick steps incomplete")
+assert(string.find(quick,"1. Choose",1,true) and string.find(quick,"Click Build / Resume",1,true) and string.find(quick,"unlocked dungeon",1,true) and string.find(quick,"READY",1,true) and string.find(quick,"4. Go play!",1,true),"quick steps incomplete")
 for i=2,4 do
     local tab=ManTechPB_LFG.instructionTabs[i]
     this=tab; tab.scripts.OnClick(); this=nil

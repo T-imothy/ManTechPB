@@ -1,7 +1,7 @@
 -- ManTechPB
 -- Standalone, task-oriented CMaNGOS PlayerBots manager.
 
-local MTPB_VERSION = "0.10.6"
+local MTPB_VERSION = "0.11.0"
 local MTPB_COMMAND_SEPARATOR = "\\\\"
 local MTPB_SELECTED = nil
 local MTPB_CURRENT_TAB = "HOME"
@@ -1991,7 +1991,7 @@ function ManTechPB_LFGSavePlan()
     local s=ManTechPB_LFG
     local key=ManTechPB_LFGPlanKey()
     if not key or not ManTechPBDB or not s.slots or s.planRestorePending or s.rosterPending then return end
-    local plan={version=1,size=s.size,playerSlot=s.playerSlot,range=s.range,allowPvp=s.allowPvp==true,slots={}}
+    local plan={version=1,size=s.size,playerSlot=s.playerSlot,range=s.range,maxRecruitLevel=s.maxRecruitLevel,allowPvp=s.allowPvp==true,slots={}}
     for i,slot in ipairs(s.slots) do
         -- Preferences and member-to-slot hints only. Never persist authority,
         -- candidates, READY/arrival claims, or permission to prepare a member.
@@ -2011,6 +2011,7 @@ function ManTechPB_LFGRestorePlan()
     if size~=5 and size~=10 and size~=20 and size~=25 and size~=40 then return end
     for i=6,size do s.slots[i]={key="SLOT"..i,label="Slot "..i,role="dps",preference="ANY"} end
     s.size=size; s.playerSlot="DPS3"; s.allowPvp=plan.allowPvp==true
+    s.maxRecruitLevel=type(plan.maxRecruitLevel)=="number" and plan.maxRecruitLevel or nil
     if type(plan.range)=="number" and plan.range>=0 and plan.range<=10 then s.range=plan.range end
     for i=1,size do
         local slot,choice=s.slots[i],plan.slots[i]
@@ -2353,7 +2354,10 @@ function ManTechPB_LFGCandidateMatches(candidate, slot)
     if not candidate or not slot or not ManTechPB_LFGClassCanFill(candidate.class, slot) then return false end
     if not slot.keepName and not slot.prepareName and not ManTechPB_LFGRecruitClassAllowed(candidate.class) then return false end
     if ManTechPB_LFG.rejected and ManTechPB_LFG.rejected[candidate.name] then return false end
-    if candidate.level and math.abs(candidate.level-(UnitLevel("player") or 1))>ManTechPB_LFG.range then return false end
+    if candidate.level and not slot.keepName and not slot.prepareName then
+        local minimum,maximum=ManTechPB_LFGLevelBounds()
+        if candidate.level<minimum or candidate.level>maximum then return false end
+    end
     if slot.preference == "ANY" then return true end
     if slot.preference == "MELEE" then return not ManTechPB_LFGClassIsRanged(candidate.class) end
     if slot.preference == "RANGED" then return ManTechPB_LFGClassIsRanged(candidate.class) or candidate.class == "SHAMAN" or candidate.class == "DRUID" end
@@ -2514,6 +2518,14 @@ function ManTechPB_LFGRangeChanged(value)
     ManTechPB_LFG.range = tonumber(value) or 2
     if ManTechPBDB then ManTechPBDB.lfgLevelRange = ManTechPB_LFG.range end
     ManTechPB_LFGSavePlan()
+end
+
+function ManTechPB_LFGLevelBounds()
+    local s=ManTechPB_LFG
+    local cap=ManTechPB_LFGInterface()<20000 and 60 or (ManTechPB_LFGInterface()<30000 and 70 or 80)
+    local minimum=math.max(1,UnitLevel("player") or 1,s.observedLevel or 1)
+    local maximum=tonumber(s.maxRecruitLevel) or math.min(cap,minimum+2)
+    return minimum,math.min(cap,math.max(minimum,math.floor(maximum)))
 end
 
 function ManTechPB_LFGPreferenceChanged(index, value)
@@ -2771,11 +2783,8 @@ function ManTechPB_LFGStartSearch(index,automatic)
     s.candidates={}; s.seenCandidates={}
     s.restoreWhoToUI=FriendsFrame and FriendsFrame.IsVisible and FriendsFrame:IsVisible() and 1 or 0
     s.queryClasses=ManTechPB_LFGSearchClasses(type(index)=="number" and index or nil)
-    local level=UnitLevel("player") or 1
-    s.minLevel=math.max(1,level-s.range)
-    local cap=80
-    if ManTechPB_LFGInterface()<20000 then cap=60 elseif ManTechPB_LFGInterface()<30000 then cap=70 end
-    s.maxLevel=math.min(cap,level+s.range)
+    s.minLevel,s.maxLevel=ManTechPB_LFGLevelBounds()
+    if s.minLevel>s.maxLevel then ManTechPB_LFGStop("Player level exceeds this expansion's recruitment cap."); return end
     local i,slot,member
     for i=1,table.getn(s.slots) do
         slot=s.slots[i]
@@ -3366,6 +3375,7 @@ function ManTechPB_LFGBuildGroup()
         elseif not slot.prepareName then slot.locked=nil; slot.recruited=nil; slot.readySignature=nil end
     end
     if table.getn(ManTechPB_LFGRoster())>s.size then ManTechPB_LFGStop("Existing group exceeds selected size."); return end
+    if ManTechPB_Travel and not ManTechPB_Travel.beforeBuild() then return end
     s.runToken=(s.runToken or 0)+1; s.building=true; s.rejected={}; s.probes=0; s.verifyTimeouts=0; s.researchCount=0
     -- Selecting a raid size is explicit authorization to convert this party.
     if s.size>5 and (GetNumRaidMembers and GetNumRaidMembers() or 0)==0 and (GetNumPartyMembers and GetNumPartyMembers() or 0)>0 then
@@ -3409,9 +3419,9 @@ end
 function ManTechPB_ShowLFGInstructions(page)
     local s=ManTechPB_LFG
     local pages={
-        {title="Play & go",text="1. Choose your bots' classes under Class / Style.\n   Pick an exact build under Spec, or leave an Auto choice.\n\n2. Click Build / Resume at the bottom.\n\n3. Wait until every included bot says READY and the\n   bottom message confirms preparation is complete.\n\n4. Go play!\n\nThe addon finds bots, invites them one at a time, summons them, then sets their talents, behavior, gear and supplies. You do not need to invite or prepare each bot yourself.\n\nPrepare bot is an inclusion setting, not another step to click after READY. Keep members are left unchanged."},
+        {title="Play & go",text="1. Choose your bots' classes under Class / Style.\n   Pick an exact build under Spec, or leave an Auto choice.\n\n2. Set Min/Max bot levels. Select an unlocked dungeon,\n   or No teleport to build here. Click Build / Resume.\n\n3. Wait until every included bot says READY and the\n   bottom message confirms preparation is complete.\n\n4. Go play!\n\nWith a dungeon selected, the server must confirm YOUR arrival before bots are recruited, summoned and prepared. Keep members stay unchanged. After arrival the destination resets to No teleport for safe retries.\n\nPrepare bot is an inclusion setting, not another step to click after READY. Keep members are left unchanged."},
         {title="Your slots",text="ROLE\nChoose Tank, Healer or DPS. Make sure your own slot has the role you will play.\n\nCLASS / STYLE AND SPEC\nChoose a class, then an exact build under Spec (for example furyprot (slam)). Auto by role chooses a suitable unambiguous build instead. Choices persist across reloads; existing members return as Keep. Names marked ambiguous cannot be selected exactly by this core. Use Next / Previous for more builds; hover a selected build to read its full name. The bot must offer the exact choice on its live list.\n\nKEEP MEMBER\nLeave this character untouched. This is always used for you and is the default for existing group members. No role-confirmation click is needed to fill empty slots. Kept roles are planning labels, not detected talent roles.\n\nPREPARE BOT\nInclude an existing bot in summoning, respec, gear and supplies. Select this only for bots you want changed. Empty slots recruit new bots automatically."},
-        {title="Other options",text="PARTY / RAID\nChoose the desired group size. Raid selection permits party-to-raid conversion. Use Prev / Next to edit more slots. Kept humans count toward the group size.\n\nLEVEL RANGE\n+/- 2 means bots can be two levels below or above you.\n\nBUILDS: PVE ONLY\nThe default blocks PvP-labelled builds. Allow PvP fallback is optional when your server lacks a PvE preset for the chosen spec. No available matching build means preparation stops; it will not silently pick another spec.\n\nPREVIEW SEARCH / PROTOCOL\nPreview is optional; Build / Resume already searches. Leave Protocol on Core v1 for the updated server. Legacy is for older cores."},
+        {title="Other options",text="PARTY / RAID\nChoose the desired group size. Raid selection permits party-to-raid conversion. Use Prev / Next to edit more slots. Kept humans count toward the group size.\n\nLEVEL RANGE\nMin follows your current level. Type Max (default your level +2; capped at 60/70/80). Level-up pauses active work for Resume.\n\nBUILDS: PVE ONLY\nThe default blocks PvP-labelled builds. Allow PvP fallback is optional when your server lacks a PvE preset for the chosen spec. No available matching build means preparation stops; it will not silently pick another spec.\n\nDUNGEON DISCOVERY\nEnter the actual instance once AFTER the core update to unlock it for THIS character. Earlier visits cannot be recovered. Shared-map wings unlock together. Refresh unlocks checks the server, at most once every 10 seconds. Locked or unchecked destinations cannot start travel. Unlocked still requires normal travel eligibility. Hover the destination for placement notes."},
         {title="If it stops",text="READ THE BOTTOM STATUS MESSAGE\nFOUND or CANDIDATE is not READY. The bot still needs to join, arrive and finish preparation. A refusal, missing build or failed check is explained below the rows.\n\nBUILD / RESUME\nAfter resolving the problem, use this to continue. Confirmed work is retained when the plan is unchanged.\n\nCANCEL / CLEAR SEARCH\nCancel stops unsent work; it does not kick bots or undo completed changes. An action already sent can still finish. Closing the window does not cancel. Clear search clears candidates, not your party.\n\nUNCERTAIN GEAR RESULT\nDo not repeatedly restart. Inspect the bot and see Help before clearing a saved preparation checkpoint."}
     }
     page=tonumber(page) or 1
@@ -3469,7 +3479,7 @@ function ManTechPB_CreateLFGFrame()
     instructions:SetWidth(104); instructions:SetHeight(24); instructions:SetPoint("TOPRIGHT",f,"TOPRIGHT",-92,-10); instructions:SetText("Instructions")
     ManTechPB_StyleButton(instructions,12); instructions:SetScript("OnClick",function() ManTechPB_ShowLFGInstructions(1) end)
     local intro=f:CreateFontString(nil,"OVERLAY","GameFontNormal"); intro:SetPoint("TOPLEFT",f,"TOPLEFT",20,-47); intro:SetWidth(958); intro:SetJustifyH("LEFT"); ManTechPB_SetReadableFont(intro,12,"")
-    intro:SetText("Choose Role, Class and Spec -> Build / Resume. Recruit -> summon -> confirm talents/profile -> gear/supplies. Keep members stay unchanged. Raid size authorizes raid conversion.")
+    intro:SetText("Set composition, levels and optional dungeon -> Build / Resume. Teleport -> recruit -> summon -> prep. Keep members stay unchanged. Raid size authorizes conversion.")
     s.sizeDropdown=ManTechPB_CreateLFGDropdown(f,20,-91,156,{{value=5,label="Party (5)"},{value=10,label="Raid (10)"},{value=20,label="Raid (20)"},{value=25,label="Raid (25)"},{value=40,label="Raid (40)"}},s.size,ManTechPB_LFGSetSize)
     s.rangeDropdown=ManTechPB_CreateLFGDropdown(f,190,-91,142,{{value=0,label="Exact level"},{value=1,label="+/- 1 level"},{value=2,label="+/- 2 levels"},{value=3,label="+/- 3 levels"},{value=5,label="+/- 5 levels"}},s.range,ManTechPB_LFGRangeChanged)
     s.buildPolicy=ManTechPB_CreateLFGDropdown(f,348,-91,150,{{value="PVE",label="Builds: PvE only"},{value="ANY",label="Allow PvP fallback"}},s.allowPvp and "ANY" or "PVE",ManTechPB_LFGBuildPolicyChanged)

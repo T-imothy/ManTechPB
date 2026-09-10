@@ -3,6 +3,8 @@
 ## Author: ManTech
 ## Notes: Standalone, guided CMaNGOS PlayerBots manager with one tabbed interface
 ## SavedVariables: ManTechPBDB
-## Version: 0.10.6-WotLK.1
+## Version: 0.11.0-WotLK.1
 ManTechPB.lua
 Recruitment.lua
+Destinations.lua
+Travel.lua
